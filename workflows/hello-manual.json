@@ -1,0 +1,19 @@
+{
+  "name": "Local Hello Manual",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b85e863c-5f94-4eb3-93ab-c8f2a495450d",
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ]
+    }
+  ],
+  "connections": {},
+  "settings": {},
+  "staticData": null
+}

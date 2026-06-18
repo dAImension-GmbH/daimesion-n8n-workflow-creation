@@ -1,0 +1,18 @@
+{
+  "name": "n8n-workflow-creation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local workflow creation tooling for n8n.",
+  "scripts": {
+    "check": "node scripts/n8n.js check",
+    "list": "node scripts/n8n.js list",
+    "validate": "node scripts/n8n.js validate workflows",
+    "deploy": "node scripts/n8n.js deploy workflows",
+    "pull": "node scripts/n8n.js pull workflows/exported"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+
