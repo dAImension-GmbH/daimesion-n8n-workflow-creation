@@ -57,6 +57,24 @@ Deploy and activate:
 node scripts/n8n.js deploy workflows/hello-manual.json --activate
 ```
 
+Update existing workflows in n8n without creating missing ones:
+
+```sh
+npm run update
+```
+
+Update a single existing workflow:
+
+```sh
+node scripts/n8n.js update workflows/hello-manual.json
+```
+
+Synchronize local workflows with n8n. This deploys local workflow JSON and writes the saved n8n workflow, including generated ids, back to the same local files:
+
+```sh
+npm run sync
+```
+
 Pull all workflows from n8n into `workflows/exported/`:
 
 ```sh
@@ -81,3 +99,6 @@ node scripts/n8n.js deactivate WORKFLOW_ID
 
 `deploy` validates JSON files before sending them to n8n. If a workflow file contains an `id`, it updates that workflow. If no `id` exists, the script looks for exactly one workflow with the same name and updates it; otherwise it creates a new workflow.
 
+`update` uses the same matching behavior, but it requires every local workflow to already exist in n8n. It fails instead of creating a new workflow.
+
+`sync` also uses the same matching behavior as `deploy`, then fetches the saved workflow from n8n and writes it back to the source JSON file. Use this after creating workflows so local files keep the n8n-generated `id`.

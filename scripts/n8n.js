@@ -32,6 +32,12 @@ async function main() {
     case "deploy":
       await deploy(args);
       break;
+    case "update":
+      await update(args);
+      break;
+    case "sync":
+      await sync(args);
+      break;
     case "pull":
       await pull(args[0] ?? "workflows/exported");
       break;
@@ -132,6 +138,27 @@ async function validateCommand(target) {
 }
 
 async function deploy(args) {
+  await pushWorkflows(args, {
+    createMissing: true,
+    writeBack: false,
+  });
+}
+
+async function update(args) {
+  await pushWorkflows(args, {
+    createMissing: false,
+    writeBack: false,
+  });
+}
+
+async function sync(args) {
+  await pushWorkflows(args, {
+    createMissing: true,
+    writeBack: true,
+  });
+}
+
+async function pushWorkflows(args, options) {
   const activateAfterDeploy = args.includes("--activate");
   const target = args.find((arg) => !arg.startsWith("--")) ?? "workflows";
   const files = await workflowFiles(target);
@@ -142,6 +169,12 @@ async function deploy(args) {
     validateWorkflow(workflow, file);
 
     const id = workflow.id ?? findExistingWorkflowId(existing, workflow.name);
+    if (!id && !options.createMissing) {
+      throw new Error(
+        `${path.relative(ROOT, file)}: no existing workflow found for "${workflow.name}". Add an id or deploy it first.`,
+      );
+    }
+
     const payload = toApiPayload(workflow);
     const saved = id
       ? await api(`/workflows/${encodeURIComponent(id)}`, {
@@ -157,7 +190,14 @@ async function deploy(args) {
       await api(`/workflows/${encodeURIComponent(saved.id)}/activate`, { method: "POST" });
     }
 
-    console.log(`${id ? "Updated" : "Created"} ${saved.id}\t${workflow.name}`);
+    if (options.writeBack) {
+      const fullWorkflow = await api(`/workflows/${encodeURIComponent(saved.id)}`);
+      await writeFile(file, `${JSON.stringify(fullWorkflow, null, 2)}\n`);
+      console.log(`${id ? "Updated" : "Created"} ${saved.id}\t${workflow.name}\t-> ${path.relative(ROOT, file)}`);
+    } else {
+      const action = id ? "Updated" : "Created";
+      console.log(`${action} ${saved.id}\t${workflow.name}`);
+    }
   }
 }
 
@@ -272,7 +312,7 @@ function validateWorkflow(workflow, source) {
 function findExistingWorkflowId(workflows, name) {
   const matches = workflows.filter((workflow) => workflow.name === name);
   if (matches.length > 1) {
-    throw new Error(`Multiple existing workflows named "${name}". Add an id to the JSON file before deploying.`);
+    throw new Error(`Multiple existing workflows named "${name}". Add an id to the JSON file.`);
   }
   return matches[0]?.id;
 }
@@ -307,6 +347,8 @@ function printUsage() {
   node scripts/n8n.js list
   node scripts/n8n.js validate [file-or-dir]
   node scripts/n8n.js deploy [file-or-dir] [--activate]
+  node scripts/n8n.js update [file-or-dir] [--activate]
+  node scripts/n8n.js sync [file-or-dir] [--activate]
   node scripts/n8n.js pull [output-dir]
   node scripts/n8n.js activate WORKFLOW_ID
   node scripts/n8n.js deactivate WORKFLOW_ID`);

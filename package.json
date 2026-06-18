@@ -9,10 +9,11 @@
     "list": "node scripts/n8n.js list",
     "validate": "node scripts/n8n.js validate workflows",
     "deploy": "node scripts/n8n.js deploy workflows",
+    "update": "node scripts/n8n.js update workflows",
+    "sync": "node scripts/n8n.js sync workflows",
     "pull": "node scripts/n8n.js pull workflows/exported"
   },
   "engines": {
     "node": ">=18"
   }
 }
-
