@@ -1,0 +1,396 @@
+{
+  "updatedAt": "2026-06-18T19:18:58.780Z",
+  "createdAt": "2026-06-18T19:10:53.258Z",
+  "id": "PUEOI48SP6kjzRsM",
+  "name": "Google News Daily Summary",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "bdb8d74a-3849-48ef-bbc2-ac011b2904e9",
+      "name": "Every morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        120,
+        180
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "980300f0-0102-463a-9e7a-a17d6759a4c5",
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        120,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss?hl=de&gl=DE&ceid=DE:de"
+      },
+      "id": "00c9cca4-f015-4cb8-9b7f-ed67b3faf68e",
+      "name": "Read Google News RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [
+        380,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const berlinDay = new Intl.DateTimeFormat('en-CA', {\n  timeZone: 'Europe/Berlin',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n});\n\nconst today = berlinDay.format(new Date());\n\nfunction clean(value) {\n  return typeof value === 'string'\n    ? value.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim()\n    : '';\n}\n\nfunction dayKey(value) {\n  if (!value) return null;\n  const date = new Date(value);\n  return Number.isNaN(date.valueOf()) ? null : berlinDay.format(date);\n}\n\nconst seen = new Set();\nconst articles = $input.all()\n  .map(({ json }) => {\n    const title = clean(json.title);\n    const link = clean(json.link || json.guid);\n    const publishedAt = json.isoDate || json.pubDate || json.date || null;\n    const source = clean(json.creator || json.author || json['dc:creator'] || 'Google News');\n    const snippet = clean(json.contentSnippet || json.content || json.description);\n\n    return { title, link, publishedAt, source, snippet };\n  })\n  .filter((article) => article.title && article.link)\n  .filter((article) => {\n    const key = `${article.title}|${article.link}`;\n    if (seen.has(key)) return false;\n    seen.add(key);\n    return true;\n  })\n  .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));\n\nconst todaysArticles = articles.filter((article) => dayKey(article.publishedAt) === today);\nconst selectedArticles = (todaysArticles.length > 0 ? todaysArticles : articles).slice(0, 25);\n\nconst articleDigest = selectedArticles.map((article, index) => [\n  `${index + 1}. ${article.title}`,\n  `Quelle: ${article.source}`,\n  `Zeit: ${article.publishedAt || 'unbekannt'}`,\n  `Link: ${article.link}`,\n  `Kurztext: ${article.snippet || 'kein Kurztext verfuegbar'}`,\n].join('\\n')).join('\\n\\n');\n\nconst systemPrompt = [\n  'Du bist ein praeziser deutschsprachiger Nachrichtenredakteur.',\n  'Fasse nur die gelieferten Google-News-RSS-Artikel zusammen.',\n  'Erfinde keine Fakten und markiere Unsicherheit klar.',\n  'Gib eine kompakte, gut lesbare Ausgabe auf Deutsch zurueck.',\n].join(' ');\n\nconst userPrompt = selectedArticles.length === 0\n  ? `Heute ist ${today} in der Zeitzone Europe/Berlin. Im Google-News-RSS-Feed wurden keine Artikel gefunden. Gib eine kurze Meldung aus, dass keine Nachrichten zusammengefasst werden konnten.`\n  : [\n      `Heute ist ${today} in der Zeitzone Europe/Berlin.`,\n      todaysArticles.length > 0\n        ? `Fasse die folgenden ${selectedArticles.length} heutigen Google-News-Artikel zusammen.`\n        : `Im Feed waren keine eindeutig heutigen Artikel. Fasse die neuesten ${selectedArticles.length} Google-News-Artikel zusammen und weise darauf hin.`,\n      '',\n      'Bitte liefere:',\n      '1. Eine Executive Summary mit 5 bis 7 Bulletpoints.',\n      '2. Die wichtigsten Themencluster mit je 2 bis 3 Saetzen.',\n      '3. Eine kurze Liste der Top-Links mit Titel und URL.',\n      '',\n      articleDigest,\n    ].join('\\n');\n\nreturn [{\n  json: {\n    date: today,\n    source: 'Google News Deutschland RSS',\n    feedUrl: 'https://news.google.com/rss?hl=de&gl=DE&ceid=DE:de',\n    articleCount: selectedArticles.length,\n    onlyLatestArticles: todaysArticles.length === 0,\n    articles: selectedArticles,\n    llmRequest: {\n      model: 'qwen3.6',\n      temperature: 0.2,\n      messages: [\n        { role: 'system', content: systemPrompt },\n        { role: 'user', content: userPrompt },\n      ],\n    },\n  },\n}];"
+      },
+      "id": "9b35df67-f462-41ef-a763-11c550f2086d",
+      "name": "Prepare News Summary Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.llmRequest }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "Vmx5VeUdNM2zhxzw",
+          "name": "Daimension LLM Bearer Auth"
+        }
+      },
+      "id": "ddccd499-77c0-417a-be6e-ad1b1ba755bc",
+      "name": "Summarize with Daimension LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const content = $json.choices?.[0]?.message?.content\n  || $json.output_text\n  || $json.text\n  || JSON.stringify($json, null, 2);\n\nreturn [{\n  json: {\n    generatedAt: new Date().toISOString(),\n    model: $json.model || 'qwen3.6',\n    summary: content,\n    usage: $json.usage || null,\n  },\n}];"
+      },
+      "id": "80f25581-be17-4a1b-b85f-1b5764d6218b",
+      "name": "Format Summary Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Every morning": {
+      "main": [
+        [
+          {
+            "node": "Read Google News RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking 'Test workflow'": {
+      "main": [
+        [
+          {
+            "node": "Read Google News RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Google News RSS": {
+      "main": [
+        [
+          {
+            "node": "Prepare News Summary Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare News Summary Prompt": {
+      "main": [
+        [
+          {
+            "node": "Summarize with Daimension LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize with Daimension LLM": {
+      "main": [
+        [
+          {
+            "node": "Format Summary Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
+  "activeVersionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
+  "versionCounter": 5,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-18T19:10:53.259Z",
+      "createdAt": "2026-06-18T19:10:53.259Z",
+      "role": "workflow:owner",
+      "workflowId": "PUEOI48SP6kjzRsM",
+      "projectId": "LMxbbUGshEwmCSrO",
+      "project": {
+        "updatedAt": "2026-06-18T18:45:49.668Z",
+        "createdAt": "2026-06-18T18:42:48.428Z",
+        "id": "LMxbbUGshEwmCSrO",
+        "name": "Maik Daniel Klause <maik.klause@daimension.de>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "32d9ee0a-a769-4905-afbc-c590af56d0ad"
+      }
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-18T19:18:58.780Z",
+    "createdAt": "2026-06-18T19:18:58.780Z",
+    "versionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
+    "workflowId": "PUEOI48SP6kjzRsM",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "days",
+                "triggerAtHour": 7
+              }
+            ]
+          }
+        },
+        "id": "bdb8d74a-3849-48ef-bbc2-ac011b2904e9",
+        "name": "Every morning",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          120,
+          180
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "980300f0-0102-463a-9e7a-a17d6759a4c5",
+        "name": "When clicking 'Test workflow'",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          120,
+          380
+        ]
+      },
+      {
+        "parameters": {
+          "url": "https://news.google.com/rss?hl=de&gl=DE&ceid=DE:de"
+        },
+        "id": "00c9cca4-f015-4cb8-9b7f-ed67b3faf68e",
+        "name": "Read Google News RSS",
+        "type": "n8n-nodes-base.rssFeedRead",
+        "typeVersion": 1,
+        "position": [
+          380,
+          280
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const berlinDay = new Intl.DateTimeFormat('en-CA', {\n  timeZone: 'Europe/Berlin',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n});\n\nconst today = berlinDay.format(new Date());\n\nfunction clean(value) {\n  return typeof value === 'string'\n    ? value.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim()\n    : '';\n}\n\nfunction dayKey(value) {\n  if (!value) return null;\n  const date = new Date(value);\n  return Number.isNaN(date.valueOf()) ? null : berlinDay.format(date);\n}\n\nconst seen = new Set();\nconst articles = $input.all()\n  .map(({ json }) => {\n    const title = clean(json.title);\n    const link = clean(json.link || json.guid);\n    const publishedAt = json.isoDate || json.pubDate || json.date || null;\n    const source = clean(json.creator || json.author || json['dc:creator'] || 'Google News');\n    const snippet = clean(json.contentSnippet || json.content || json.description);\n\n    return { title, link, publishedAt, source, snippet };\n  })\n  .filter((article) => article.title && article.link)\n  .filter((article) => {\n    const key = `${article.title}|${article.link}`;\n    if (seen.has(key)) return false;\n    seen.add(key);\n    return true;\n  })\n  .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));\n\nconst todaysArticles = articles.filter((article) => dayKey(article.publishedAt) === today);\nconst selectedArticles = (todaysArticles.length > 0 ? todaysArticles : articles).slice(0, 25);\n\nconst articleDigest = selectedArticles.map((article, index) => [\n  `${index + 1}. ${article.title}`,\n  `Quelle: ${article.source}`,\n  `Zeit: ${article.publishedAt || 'unbekannt'}`,\n  `Link: ${article.link}`,\n  `Kurztext: ${article.snippet || 'kein Kurztext verfuegbar'}`,\n].join('\\n')).join('\\n\\n');\n\nconst systemPrompt = [\n  'Du bist ein praeziser deutschsprachiger Nachrichtenredakteur.',\n  'Fasse nur die gelieferten Google-News-RSS-Artikel zusammen.',\n  'Erfinde keine Fakten und markiere Unsicherheit klar.',\n  'Gib eine kompakte, gut lesbare Ausgabe auf Deutsch zurueck.',\n].join(' ');\n\nconst userPrompt = selectedArticles.length === 0\n  ? `Heute ist ${today} in der Zeitzone Europe/Berlin. Im Google-News-RSS-Feed wurden keine Artikel gefunden. Gib eine kurze Meldung aus, dass keine Nachrichten zusammengefasst werden konnten.`\n  : [\n      `Heute ist ${today} in der Zeitzone Europe/Berlin.`,\n      todaysArticles.length > 0\n        ? `Fasse die folgenden ${selectedArticles.length} heutigen Google-News-Artikel zusammen.`\n        : `Im Feed waren keine eindeutig heutigen Artikel. Fasse die neuesten ${selectedArticles.length} Google-News-Artikel zusammen und weise darauf hin.`,\n      '',\n      'Bitte liefere:',\n      '1. Eine Executive Summary mit 5 bis 7 Bulletpoints.',\n      '2. Die wichtigsten Themencluster mit je 2 bis 3 Saetzen.',\n      '3. Eine kurze Liste der Top-Links mit Titel und URL.',\n      '',\n      articleDigest,\n    ].join('\\n');\n\nreturn [{\n  json: {\n    date: today,\n    source: 'Google News Deutschland RSS',\n    feedUrl: 'https://news.google.com/rss?hl=de&gl=DE&ceid=DE:de',\n    articleCount: selectedArticles.length,\n    onlyLatestArticles: todaysArticles.length === 0,\n    articles: selectedArticles,\n    llmRequest: {\n      model: 'qwen3.6',\n      temperature: 0.2,\n      messages: [\n        { role: 'system', content: systemPrompt },\n        { role: 'user', content: userPrompt },\n      ],\n    },\n  },\n}];"
+        },
+        "id": "9b35df67-f462-41ef-a763-11c550f2086d",
+        "name": "Prepare News Summary Prompt",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          640,
+          280
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $env.DAIMENSION_API_KEY }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.llmRequest }}",
+          "options": {
+            "timeout": 120000
+          }
+        },
+        "id": "ddccd499-77c0-417a-be6e-ad1b1ba755bc",
+        "name": "Summarize with Daimension LLM",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          900,
+          280
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const content = $json.choices?.[0]?.message?.content\n  || $json.output_text\n  || $json.text\n  || JSON.stringify($json, null, 2);\n\nreturn [{\n  json: {\n    generatedAt: new Date().toISOString(),\n    model: $json.model || 'qwen3.6',\n    summary: content,\n    usage: $json.usage || null,\n  },\n}];"
+        },
+        "id": "80f25581-be17-4a1b-b85f-1b5764d6218b",
+        "name": "Format Summary Output",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1160,
+          280
+        ]
+      }
+    ],
+    "connections": {
+      "Every morning": {
+        "main": [
+          [
+            {
+              "node": "Read Google News RSS",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "When clicking 'Test workflow'": {
+        "main": [
+          [
+            {
+              "node": "Read Google News RSS",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read Google News RSS": {
+        "main": [
+          [
+            {
+              "node": "Prepare News Summary Prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare News Summary Prompt": {
+        "main": [
+          [
+            {
+              "node": "Summarize with Daimension LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Summarize with Daimension LLM": {
+        "main": [
+          [
+            {
+              "node": "Format Summary Output",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Maik Daniel Klause",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-18T19:18:58.799Z",
+        "id": 3,
+        "workflowId": "PUEOI48SP6kjzRsM",
+        "versionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
+        "event": "activated",
+        "userId": "32d9ee0a-a769-4905-afbc-c590af56d0ad"
+      },
+      {
+        "createdAt": "2026-06-18T19:18:58.791Z",
+        "id": 2,
+        "workflowId": "PUEOI48SP6kjzRsM",
+        "versionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
+        "event": "deactivated",
+        "userId": "32d9ee0a-a769-4905-afbc-c590af56d0ad"
+      }
+    ]
+  }
+}

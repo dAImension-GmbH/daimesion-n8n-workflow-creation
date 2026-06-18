@@ -15,6 +15,7 @@ This project contains a small local workflow-development loop for an n8n instanc
    ```env
    N8N_BASE_URL=http://localhost:5678
    N8N_API_KEY=your-api-key
+   DAIMENSION_API_KEY=your-daimension-api-key
    ```
 
 3. Confirm the local API is reachable:
@@ -50,6 +51,19 @@ Deploy a single workflow:
 ```sh
 node scripts/n8n.js deploy workflows/hello-manual.json
 ```
+
+Deploy the Google News daily summary workflow:
+
+```sh
+node scripts/n8n.js deploy workflows/google-news-daily-summary.json
+```
+
+The Google News workflow reads the German Google News RSS feed, keeps today's
+items in the `Europe/Berlin` timezone, and sends a summary prompt to the
+OpenAI-compatible Daimension endpoint
+`https://llm-inference.daimension.ai/v1/chat/completions` with model `qwen3.6`.
+The HTTP Request node uses the n8n Bearer Auth credential `Daimension LLM Bearer
+Auth`; do not store the API token directly in workflow JSON.
 
 Deploy and activate:
 
