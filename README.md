@@ -71,7 +71,14 @@ is derived from the mail correlation key. The workflow polls the asynchronous
 MinerU job and retrieves its Markdown, plain text, and page results. As soon as
 a certificate's PDF-to-text extraction succeeds, the extracted text passes
 through evidence extraction, schema normalization, and final review with
-`deepseek-v4-flash-3107` at dAImension.ai. Immediately after successful PDF
+`deepseek-v4-flash-3107` at dAImension.ai. At the end, the workflow creates a
+review in the BUHLMANN Document Review Tool and uploads both the original PDF
+and the complete normalized analysis. Reviewers can compare the source
+document and extracted values side by side at `/document-review`, correct the
+editable review payload, add comments, and approve the result. The original
+extraction remains preserved as the immutable source payload. Every imported
+row starts with `humanRequired=true`, so human confirmation is required;
+materials and norms remain part of the fields being checked. Immediately after successful PDF
 extraction, the certificate sender receives the detected text, Markdown, or
 JSON in the reply body and as a complete attachment; the final structured JSON
 is sent in a separate Outlook reply. There is no pairing with a counterpart
@@ -83,7 +90,11 @@ Before activation, configure the Microsoft Outlook OAuth2 credential on the
 trigger and all reply nodes. Also verify the token stored in the n8n Bearer
 credential `Daimension LLM Bearer Auth`. If its HTTP Request domains are
 restricted, allow both hostnames `llm-inference.daimension.ai` and
-`pdf.daimension.ai` without URL schemes or paths.
+`pdf.daimension.ai` without URL schemes or paths. Create a second n8n Bearer
+Auth credential named `Buhlmann Document Review Bearer Auth`, store the DRT
+service key with `document:read` and `document:write` scopes there, and allow the hostname
+`buhlmann-document-review.daimension.ai`. The service key must never be stored
+directly in workflow JSON.
 
 The Google News workflow reads the German Google News RSS feed, keeps today's
 items in the `Europe/Berlin` timezone, and sends a summary prompt to the

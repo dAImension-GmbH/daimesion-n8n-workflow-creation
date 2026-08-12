@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-06T08:44:30.971Z",
+  "updatedAt": "2026-08-12T11:26:46.624Z",
   "createdAt": "2026-08-05T13:45:59.513Z",
   "id": "oLtOyTcKU11RrNJC",
   "name": "Outlook Certificate Analysis (MinerU + DeepSeek)",
@@ -9,9 +9,9 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Einrichtung\n1. **Microsoft Outlook OAuth2** ist am Trigger und an allen Outlook-Antwort-Nodes zugeordnet.\n2. Das Credential **Daimension LLM Bearer Auth** ist für `llm-inference.daimension.ai` und `pdf.daimension.ai` freigegeben.\n3. Aktivieren. Der Workflow lädt PDF-Anhänge herunter; jede Zertifikatsmail wird **unabhängig** analysiert, sobald ihr PDF-Anhang per MinerU als Text extrahiert wurde. Getrennt eintreffende Zusatz-/Bestelldaten-Mails werden gespeichert und bestätigt, verzögern die Analyse aber nicht.\n\nPDFs werden in Dataset **4037** unter einer stabil aus der Mail-Korrelation abgeleiteten Case-Nummer gespeichert. Der Workflow pollt die asynchrone MinerU-Extraktion und sendet Text, Markdown oder JSON sofort als Mailtext und vollständigen Anhang an den Absender zurück. Die strukturierte Auswertung verwendet `deepseek-v4-flash-3107` bei dAImension.ai. Zusatzinfo-Mails erhalten eine Bestätigung; das finale Analyse-JSON wird per Outlook zurückgesendet.",
-        "height": 420,
-        "width": 520,
+        "content": "## Einrichtung\n1. **Microsoft Outlook OAuth2** ist am Trigger und an allen Outlook-Antwort-Nodes zugeordnet.\n2. Das Credential **Daimension LLM Bearer Auth** ist für `llm-inference.daimension.ai` und `pdf.daimension.ai` freigegeben.\n3. Ein n8n-Credential vom Typ **Bearer Auth** mit dem Namen **Buhlmann Document Review Bearer Auth** enthält den DRT-Service-Key mit `document:read` und `document:write` und ist für `buhlmann-document-review.daimension.ai` freigegeben.\n4. Aktivieren. Der Workflow lädt PDF-Anhänge herunter und analysiert jedes Zertifikat unabhängig.\n\nNach MinerU und der strukturierten DeepSeek-Auswertung legt der Workflow im BUHLMANN Dokumentenreview ein Review an. Original-PDF und extrahierte Werte stehen dort direkt nebeneinander. Die initiale Extraktion bleibt als `sourcePayload` unverändert erhalten; menschliche Korrekturen werden revisioniert im `reviewPayload` gespeichert. Alle Ergebniszeilen starten mit `humanRequired=true`, damit eine bewusste manuelle Bestätigung erforderlich ist. Normen und Werkstoffe sind Teil der kontrollierbaren Extraktionsfelder; der menschliche Werteabgleich ist der primäre DRT-Schritt.",
+        "height": 550,
+        "width": 650,
         "color": 5
       },
       "id": "97e2346e-cc57-40f1-a56d-01c1c1c59e11",
@@ -740,14 +740,214 @@
     },
     {
       "parameters": {
-        "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object') return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Prüfung enthält kein valides JSON.');\n}\nconst response = $input.first().json;\nconst context = $('Qualitätsprüfung vorbereiten').first().json;\nconst envelope = parseJson(response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response);\nconst rows = Array.isArray(envelope) ? envelope : (Array.isArray(envelope.results) ? envelope.results : []);\nif (!rows.length) throw new Error('Die geprüfte Antwort enthält keine Ergebniszeilen.');\nconst chemicalKeys = ['C','SI','S','P','SN','MN','CR','NI','MO','TI','CO','CU','N','AL','V','NB','B','Zr','W','Sb','As','AL/N','Nb+(V2,5)','Nb+V+Ti','Mn/C','CEV','V+NB','Ni+Cu','Cu+Ni+Cr+Mo+V','Cr+Cu+Mo+Ni','Cu+Mo'];\nconst toNumber = (value) => { const n = typeof value === 'number' ? value : Number(String(value ?? '').trim().replace(',', '.').replace(/^[<>≈~]\\s*/, '').replace(/\\s*(?:MPa|%|m|pcs?)$/i, '')); return Number.isFinite(n) && n >= -1 ? n : -1; };\nconst toString = (value) => { const text = String(value ?? '').trim(); return text && text.toLowerCase() !== 'null' ? text : '-1'; };\nconst normalized = rows.map((row) => {\n  const chemicals = {};\n  for (const key of chemicalKeys) { const aliases = [key, key.toUpperCase()]; let value = -1; for (const alias of aliases) if (row.chemicals && Object.prototype.hasOwnProperty.call(row.chemicals, alias)) value = toNumber(row.chemicals[alias]); chemicals[key] = value; }\n  const dimensionsRaw = toString(row.dimensions);\n  const dm = dimensionsRaw.match(/(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:mm[^0-9]*)?(?:x|×|\\/)\\s*(\\d{1,4}(?:[.,]\\d+)?)/i);\n  const dimensions = dimensionsRaw === '-1' ? '-1' : (dm ? `${dm[1].replace(',', '.')} x ${dm[2].replace(',', '.')} mm` : '-1');\n  let humanRequired = row.humanRequired === true || (dimensions === '-1' && dimensionsRaw !== '-1');\n  const po = toString(row.customerOrderNumber);\n  const expectedPo = toString(context.orderData?.poNumber);\n  if (expectedPo !== '-1' && po.toUpperCase() !== expectedPo.toUpperCase()) humanRequired = true;\n  return {\n    heatNumber: toString(row.heatNumber), chemicals, yieldStrength02: toNumber(row.yieldStrength02), yieldStrength10: toNumber(row.yieldStrength10), tensileStrength: toNumber(row.tensileStrength), elongation: toNumber(row.elongation), certificateNumber: toString(row.certificateNumber), quantity: Math.round(toNumber(row.quantity) * 100) / 100, creditor: toString(row.creditor), product: toString(row.product), humanRequired, customerOrderNumber: po, dimensions, werkstoff1: toString(row.werkstoff1), werkstoff2: toString(row.werkstoff2), werkstoff3: toString(row.werkstoff3), werkstoff4: toString(row.werkstoff4), werkstoff5: toString(row.werkstoff5), norm1: toString(row.norm1), norm2: toString(row.norm2), norm3: toString(row.norm3), norm4: toString(row.norm4), norm5: toString(row.norm5)\n  };\n});\nconst result = { correlationKey: context.correlationKey, generatedAt: new Date().toISOString(), mineru: { endpoint: context.pair.certificate.mineruEndpoint, model: context.pair.certificate.mineruModel }, llm: { endpoint: 'https://llm-inference.daimension.ai/v1/chat/completions', model: 'deepseek-v4-flash-3107' }, sourceMails: { certificate: { id: context.pair.certificate.mailId, subject: context.pair.certificate.subject, fileName: context.pair.certificate.fileName }, additionalInfo: context.pair.additionalInfo ? { id: context.pair.additionalInfo.mailId, subject: context.pair.additionalInfo.subject } : null }, results: normalized };\nconst state = $getWorkflowStaticData('global');\nif (state.pendingCertificatePairs) delete state.pendingCertificatePairs[context.correlationKey];\nconst jsonText = JSON.stringify(result, null, 2);\nconst safeName = String(context.correlationKey).replace(/[^A-Za-z0-9._-]+/g, '_');\nreturn [{ json: { ...result, replyMailId: context.replyMailId, replyText: `Die Zertifikatsanalyse für ${context.correlationKey} ist abgeschlossen. ${normalized.length} Schmelzen-/Mengenzeile(n) wurden extrahiert. Datensätze mit humanRequired=true müssen manuell geprüft werden. Das vollständige JSON ist angehängt.` }, binary: { result: { data: Buffer.from(jsonText).toString('base64'), mimeType: 'application/json', fileName: `certificate-analysis-${safeName}.json` } } }];"
+        "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object') return value;\n  const text = String(value ?? '').trim().replace(/^\\`\\`\\`(?:json)?\\s*/i, '').replace(/\\s*\\`\\`\\`$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Prüfung enthält kein valides JSON.');\n}\nconst response = $input.first().json;\nconst context = $('Qualitätsprüfung vorbereiten').first().json;\nconst envelope = parseJson(response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response);\nconst rows = Array.isArray(envelope) ? envelope : (Array.isArray(envelope.results) ? envelope.results : []);\nif (!rows.length) throw new Error('Die geprüfte Antwort enthält keine Ergebniszeilen.');\nconst chemicalKeys = ['C','SI','S','P','SN','MN','CR','NI','MO','TI','CO','CU','N','AL','V','NB','B','Zr','W','Sb','As','AL/N','Nb+(V2,5)','Nb+V+Ti','Mn/C','CEV','V+NB','Ni+Cu','Cu+Ni+Cr+Mo+V','Cr+Cu+Mo+Ni','Cu+Mo'];\nconst toNumber = (value) => { const n = typeof value === 'number' ? value : Number(String(value ?? '').trim().replace(',', '.').replace(/^[<>≈~]\\s*/, '').replace(/\\s*(?:MPa|%|m|pcs?)$/i, '')); return Number.isFinite(n) && n >= -1 ? n : -1; };\nconst toString = (value) => { const text = String(value ?? '').trim(); return text && text.toLowerCase() !== 'null' ? text : '-1'; };\nconst normalized = rows.map((row) => {\n  const chemicals = {};\n  for (const key of chemicalKeys) { const aliases = [key, key.toUpperCase()]; let value = -1; for (const alias of aliases) if (row.chemicals && Object.prototype.hasOwnProperty.call(row.chemicals, alias)) value = toNumber(row.chemicals[alias]); chemicals[key] = value; }\n  const dimensionsRaw = toString(row.dimensions);\n  const dm = dimensionsRaw.match(/(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:mm[^0-9]*)?(?:x|×|\\/)\\s*(\\d{1,4}(?:[.,]\\d+)?)/i);\n  const dimensions = dimensionsRaw === '-1' ? '-1' : (dm ? dm[1].replace(',', '.') + ' x ' + dm[2].replace(',', '.') + ' mm' : '-1');\n  let humanRequired = row.humanRequired === true || (dimensions === '-1' && dimensionsRaw !== '-1');\n  const po = toString(row.customerOrderNumber);\n  const expectedPo = toString(context.orderData?.poNumber);\n  if (expectedPo !== '-1' && po.toUpperCase() !== expectedPo.toUpperCase()) humanRequired = true;\n  return {\n    heatNumber: toString(row.heatNumber), chemicals, yieldStrength02: toNumber(row.yieldStrength02), yieldStrength10: toNumber(row.yieldStrength10), tensileStrength: toNumber(row.tensileStrength), elongation: toNumber(row.elongation), certificateNumber: toString(row.certificateNumber), quantity: Math.round(toNumber(row.quantity) * 100) / 100, creditor: toString(row.creditor), product: toString(row.product), humanRequired, customerOrderNumber: po, dimensions, werkstoff1: toString(row.werkstoff1), werkstoff2: toString(row.werkstoff2), werkstoff3: toString(row.werkstoff3), werkstoff4: toString(row.werkstoff4), werkstoff5: toString(row.werkstoff5), norm1: toString(row.norm1), norm2: toString(row.norm2), norm3: toString(row.norm3), norm4: toString(row.norm4), norm5: toString(row.norm5)\n  };\n});\nconst result = { correlationKey: context.correlationKey, generatedAt: new Date().toISOString(), mineru: { endpoint: context.pair.certificate.mineruEndpoint, model: context.pair.certificate.mineruModel }, llm: { endpoint: 'https://llm-inference.daimension.ai/v1/chat/completions', model: 'deepseek-v4-flash-3107' }, sourceMails: { certificate: { id: context.pair.certificate.mailId, subject: context.pair.certificate.subject, fileName: context.pair.certificate.fileName }, additionalInfo: context.pair.additionalInfo ? { id: context.pair.additionalInfo.mailId, subject: context.pair.additionalInfo.subject } : null }, results: normalized };\nreturn [{ json: { ...result, replyMailId: context.replyMailId } }];"
       },
       "id": "c91a7110-cdba-4c01-8b7e-87eab393a27c",
-      "name": "Ergebnis validieren und JSON bauen",
+      "name": "Ergebnis validieren und Dokumentenreview vorbereiten",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         3640,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "1bf4c05d-d918-4959-b74a-1e092e8efdc0",
+      "name": "Original-PDF und Analyse zusammenführen",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3900,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst pdfIndex = items.findIndex(item => item.binary?.data);\nconst analysisItem = items.find(item => Array.isArray(item.json?.results));\nif (pdfIndex < 0) throw new Error('Das Original-PDF fehlt für den Dokumentenreview.');\nif (!analysisItem) throw new Error('Die finalen Analysewerte fehlen für den Dokumentenreview.');\nconst pdfBuffer = await this.helpers.getBinaryDataBuffer(pdfIndex, 'data');\nif (pdfBuffer.length < 5 || pdfBuffer.subarray(0, 5).toString('ascii') !== '%PDF-') throw new Error('Für den Dokumentenreview wurde keine gültige PDF-Datei bereitgestellt.');\nconst sourceBinary = items[pdfIndex].binary.data;\nconst rawName = String(sourceBinary.fileName ?? analysisItem.json.sourceMails?.certificate?.fileName ?? 'certificate.pdf').normalize('NFC');\nconst baseName = rawName.replace(/\\.pdf$/i, '').replace(/[\\\\/:*?\\\"<>|\\u0000-\\u001F\\u007F]+/g, '_').replace(/[.\\s]+$/g, '').trim() || 'certificate';\nlet fileName = baseName + '.pdf';\nwhile (Buffer.byteLength(fileName, 'utf8') > 240 && baseName.length > 1) fileName = baseName.slice(0, Math.max(1, baseName.length - 1)) + '.pdf';\nconst materializedPdf = await this.helpers.prepareBinaryData(pdfBuffer, fileName, 'application/pdf');\nconst reviewAnalysis = analysisItem.json.results.map(row => ({ ...row, humanRequired: true }));\nconst sourceMailId = String(analysisItem.json.sourceMails?.certificate?.id ?? analysisItem.json.correlationKey ?? 'certificate');\nconst clientRequestId = ('n8n-certificate-' + sourceMailId).replace(/[^A-Za-z0-9._:-]+/g, '-').slice(0, 120);\nconst certificateNumber = reviewAnalysis.find(row => row.certificateNumber && row.certificateNumber !== '-1')?.certificateNumber;\nconst rawTitle = certificateNumber ? 'Zertifikat ' + certificateNumber : 'Zertifikat ' + analysisItem.json.correlationKey;\nconst title = rawTitle.slice(0, 240);\nreturn [{\n  json: {\n    ...analysisItem.json,\n    results: reviewAnalysis,\n    reviewCreateRequest: { title, fileName, contentType: 'application/pdf', sizeBytes: pdfBuffer.length, clientRequestId, analysis: reviewAnalysis }\n  },\n  binary: { data: materializedPdf }\n}];"
+      },
+      "id": "ba44b5ca-7745-4629-ac46-d1106bcf8aa2",
+      "name": "Dokumentenreview-Upload vorbereiten",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4160,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://buhlmann-document-review.daimension.ai/api/v1/documents",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { ...$json.reviewCreateRequest, clientRequestId: 'n8n-certificate-execution-' + $execution.id } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "b98aa270-04a6-4e73-b2cc-76eaa9f6d407",
+      "name": "Dokumentenreview anlegen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4420,
+        80
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "2GhCkGbqxuSjxHPm",
+          "name": "Buhlmann Document Review Bearer Auth v2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const created = $input.first().json;\nconst source = $('Dokumentenreview-Upload vorbereiten').first();\nconst document = created.document;\nif (!document?.id) throw new Error('Das Document Review Tool lieferte keine Dokument-ID.');\nconst uploadRequired = document.uploadState === 'pending' && typeof created.uploadUrl === 'string' && created.uploadUrl.length > 0;\nif (!uploadRequired && document.uploadState !== 'ready') throw new Error('Der Dokumentenreview-Upload befindet sich in einem unerwarteten Zustand: ' + String(document.uploadState));\nreturn [{ json: { ...source.json, documentUpload: created, uploadRequired }, binary: source.binary }];"
+      },
+      "id": "159ddf16-ac56-437a-9800-452531376e4d",
+      "name": "Review-Uploadantwort mit PDF verbinden",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4680,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3790f2f6-e278-4ab7-98ea-21982af1cd35",
+              "leftValue": "={{ $json.uploadRequired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "34ea155f-6402-4ab7-b80c-5200b5d13baf",
+      "name": "PDF-Upload erforderlich?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4940,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://buhlmann-document-review.daimension.ai/api/v1/documents/' + $('Dokumentenreview anlegen').first().json.document.id + '/upload' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "b649f9dc-af49-4b49-b2c5-bf08bc126594",
+      "name": "Original-PDF in Review-Speicher hochladen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5200,
+        0
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "2GhCkGbqxuSjxHPm",
+          "name": "Buhlmann Document Review Bearer Auth v2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://buhlmann-document-review.daimension.ai/api/v1/documents/' + $('Dokumentenreview anlegen').first().json.document.id + '/complete' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "648aa38e-6b49-4db5-a53d-e50450f1847d",
+      "name": "Dokumentenreview-Upload abschließen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5460,
+        0
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "2GhCkGbqxuSjxHPm",
+          "name": "Buhlmann Document Review Bearer Auth v2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $('Dokumentenreview-Upload vorbereiten').first().json;\nconst created = $('Dokumentenreview anlegen').first().json;\nconst document = created.document;\nif (!document?.id) throw new Error('Der angelegte Dokumentenreview enthält keine Dokument-ID.');\nconst completed = $input.first().json;\nconst result = {\n  correlationKey: source.correlationKey,\n  generatedAt: source.generatedAt,\n  mineru: source.mineru,\n  llm: source.llm,\n  documentReview: {\n    id: document.id,\n    url: 'https://buhlmann-document-review.daimension.ai/document-review',\n    apiUrl: 'https://buhlmann-document-review.daimension.ai/api/v1/documents/' + document.id,\n    status: completed.status ?? document.status ?? 'draft',\n    uploadState: completed.uploadState ?? document.uploadState ?? 'ready',\n    analysisRevision: completed.analysisRevision ?? document.analysisRevision ?? 1,\n    purpose: 'Manueller Abgleich von Originaldokument und extrahierten Werten'\n  },\n  sourceMails: source.sourceMails,\n  results: source.results\n};\nconst state = $getWorkflowStaticData('global');\nif (state.pendingCertificatePairs) delete state.pendingCertificatePairs[result.correlationKey];\nconst jsonText = JSON.stringify(result, null, 2);\nconst safeName = String(result.correlationKey).replace(/[^A-Za-z0-9._-]+/g, '_');\nconst replyText = 'Die Zertifikatsanalyse für ' + result.correlationKey + ' ist abgeschlossen. ' + result.results.length + ' Schmelzen-/Mengenzeile(n) wurden extrahiert. Das Original-PDF und die extrahierten Werte stehen jetzt im BUHLMANN Dokumentenreview zur manuellen Gegenprüfung bereit. Review-ID: ' + document.id + '\\n\\nhttps://buhlmann-document-review.daimension.ai/document-review\\n\\nAlle Datensätze sind zunächst mit humanRequired=true markiert und müssen im Review bestätigt oder korrigiert werden. Das vollständige JSON ist angehängt.';\nreturn [{ json: { ...result, replyMailId: source.replyMailId, replyText }, binary: { result: { data: Buffer.from(jsonText).toString('base64'), mimeType: 'application/json', fileName: 'certificate-analysis-' + safeName + '.json' } } }];"
+      },
+      "id": "9f7e0925-6a92-4ab0-adf3-c226b37d967b",
+      "name": "Dokumentenreview im Ergebnis verknüpfen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5720,
         80
       ]
     },
@@ -779,7 +979,7 @@
       "type": "n8n-nodes-base.microsoftOutlook",
       "typeVersion": 2,
       "position": [
-        3900,
+        5980,
         80
       ],
       "credentials": {
@@ -883,6 +1083,11 @@
         [
           {
             "node": "PDF bei MinerU einreichen",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Original-PDF und Analyse zusammenführen",
             "type": "main",
             "index": 0
           }
@@ -1087,18 +1292,7 @@
       "main": [
         [
           {
-            "node": "Ergebnis validieren und JSON bauen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Ergebnis validieren und JSON bauen": {
-      "main": [
-        [
-          {
-            "node": "Ergebnis per Outlook senden",
+            "node": "Ergebnis validieren und Dokumentenreview vorbereiten",
             "type": "main",
             "index": 0
           }
@@ -1108,6 +1302,112 @@
     "Bestätigung per Outlook": {
       "main": [
         []
+      ]
+    },
+    "Ergebnis validieren und Dokumentenreview vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "Original-PDF und Analyse zusammenführen",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Original-PDF und Analyse zusammenführen": {
+      "main": [
+        [
+          {
+            "node": "Dokumentenreview-Upload vorbereiten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dokumentenreview-Upload vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "Dokumentenreview anlegen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dokumentenreview anlegen": {
+      "main": [
+        [
+          {
+            "node": "Review-Uploadantwort mit PDF verbinden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review-Uploadantwort mit PDF verbinden": {
+      "main": [
+        [
+          {
+            "node": "PDF-Upload erforderlich?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF-Upload erforderlich?": {
+      "main": [
+        [
+          {
+            "node": "Original-PDF in Review-Speicher hochladen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dokumentenreview im Ergebnis verknüpfen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Original-PDF in Review-Speicher hochladen": {
+      "main": [
+        [
+          {
+            "node": "Dokumentenreview-Upload abschließen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dokumentenreview-Upload abschließen": {
+      "main": [
+        [
+          {
+            "node": "Dokumentenreview im Ergebnis verknüpfen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dokumentenreview im Ergebnis verknüpfen": {
+      "main": [
+        [
+          {
+            "node": "Ergebnis per Outlook senden",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
@@ -1121,7 +1421,7 @@
   },
   "staticData": {
     "node:Neue Outlook Mail": {
-      "lastTimeChecked": "2026-08-06T10:44:31.088+02:00"
+      "lastTimeChecked": "2026-08-12T13:26:49.960+02:00"
     }
   },
   "meta": {
@@ -1129,9 +1429,9 @@
   },
   "nodeGroups": [],
   "pinData": {},
-  "versionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
-  "activeVersionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
-  "versionCounter": 24,
+  "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
+  "activeVersionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
+  "versionCounter": 27,
   "triggerCount": 1,
   "sourceWorkflowId": null,
   "shared": [
@@ -1156,16 +1456,16 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-08-06T08:44:30.974Z",
-    "createdAt": "2026-08-06T08:44:30.974Z",
-    "versionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
+    "updatedAt": "2026-08-12T11:26:46.627Z",
+    "createdAt": "2026-08-12T11:26:46.627Z",
+    "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
     "workflowId": "oLtOyTcKU11RrNJC",
     "nodes": [
       {
         "parameters": {
-          "content": "## Einrichtung\n1. **Microsoft Outlook OAuth2** ist am Trigger und an allen Outlook-Antwort-Nodes zugeordnet.\n2. Das Credential **Daimension LLM Bearer Auth** ist für `llm-inference.daimension.ai` und `pdf.daimension.ai` freigegeben.\n3. Aktivieren. Der Workflow lädt PDF-Anhänge herunter; jede Zertifikatsmail wird **unabhängig** analysiert, sobald ihr PDF-Anhang per MinerU als Text extrahiert wurde. Getrennt eintreffende Zusatz-/Bestelldaten-Mails werden gespeichert und bestätigt, verzögern die Analyse aber nicht.\n\nPDFs werden in Dataset **4037** unter einer stabil aus der Mail-Korrelation abgeleiteten Case-Nummer gespeichert. Der Workflow pollt die asynchrone MinerU-Extraktion und sendet Text, Markdown oder JSON sofort als Mailtext und vollständigen Anhang an den Absender zurück. Die strukturierte Auswertung verwendet `deepseek-v4-flash-3107` bei dAImension.ai. Zusatzinfo-Mails erhalten eine Bestätigung; das finale Analyse-JSON wird per Outlook zurückgesendet.",
-          "height": 420,
-          "width": 520,
+          "content": "## Einrichtung\n1. **Microsoft Outlook OAuth2** ist am Trigger und an allen Outlook-Antwort-Nodes zugeordnet.\n2. Das Credential **Daimension LLM Bearer Auth** ist für `llm-inference.daimension.ai` und `pdf.daimension.ai` freigegeben.\n3. Ein n8n-Credential vom Typ **Bearer Auth** mit dem Namen **Buhlmann Document Review Bearer Auth** enthält den DRT-Service-Key mit `document:read` und `document:write` und ist für `buhlmann-document-review.daimension.ai` freigegeben.\n4. Aktivieren. Der Workflow lädt PDF-Anhänge herunter und analysiert jedes Zertifikat unabhängig.\n\nNach MinerU und der strukturierten DeepSeek-Auswertung legt der Workflow im BUHLMANN Dokumentenreview ein Review an. Original-PDF und extrahierte Werte stehen dort direkt nebeneinander. Die initiale Extraktion bleibt als `sourcePayload` unverändert erhalten; menschliche Korrekturen werden revisioniert im `reviewPayload` gespeichert. Alle Ergebniszeilen starten mit `humanRequired=true`, damit eine bewusste manuelle Bestätigung erforderlich ist. Normen und Werkstoffe sind Teil der kontrollierbaren Extraktionsfelder; der menschliche Werteabgleich ist der primäre DRT-Schritt.",
+          "height": 550,
+          "width": 650,
           "color": 5
         },
         "id": "97e2346e-cc57-40f1-a56d-01c1c1c59e11",
@@ -1894,14 +2194,214 @@
       },
       {
         "parameters": {
-          "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object') return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Prüfung enthält kein valides JSON.');\n}\nconst response = $input.first().json;\nconst context = $('Qualitätsprüfung vorbereiten').first().json;\nconst envelope = parseJson(response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response);\nconst rows = Array.isArray(envelope) ? envelope : (Array.isArray(envelope.results) ? envelope.results : []);\nif (!rows.length) throw new Error('Die geprüfte Antwort enthält keine Ergebniszeilen.');\nconst chemicalKeys = ['C','SI','S','P','SN','MN','CR','NI','MO','TI','CO','CU','N','AL','V','NB','B','Zr','W','Sb','As','AL/N','Nb+(V2,5)','Nb+V+Ti','Mn/C','CEV','V+NB','Ni+Cu','Cu+Ni+Cr+Mo+V','Cr+Cu+Mo+Ni','Cu+Mo'];\nconst toNumber = (value) => { const n = typeof value === 'number' ? value : Number(String(value ?? '').trim().replace(',', '.').replace(/^[<>≈~]\\s*/, '').replace(/\\s*(?:MPa|%|m|pcs?)$/i, '')); return Number.isFinite(n) && n >= -1 ? n : -1; };\nconst toString = (value) => { const text = String(value ?? '').trim(); return text && text.toLowerCase() !== 'null' ? text : '-1'; };\nconst normalized = rows.map((row) => {\n  const chemicals = {};\n  for (const key of chemicalKeys) { const aliases = [key, key.toUpperCase()]; let value = -1; for (const alias of aliases) if (row.chemicals && Object.prototype.hasOwnProperty.call(row.chemicals, alias)) value = toNumber(row.chemicals[alias]); chemicals[key] = value; }\n  const dimensionsRaw = toString(row.dimensions);\n  const dm = dimensionsRaw.match(/(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:mm[^0-9]*)?(?:x|×|\\/)\\s*(\\d{1,4}(?:[.,]\\d+)?)/i);\n  const dimensions = dimensionsRaw === '-1' ? '-1' : (dm ? `${dm[1].replace(',', '.')} x ${dm[2].replace(',', '.')} mm` : '-1');\n  let humanRequired = row.humanRequired === true || (dimensions === '-1' && dimensionsRaw !== '-1');\n  const po = toString(row.customerOrderNumber);\n  const expectedPo = toString(context.orderData?.poNumber);\n  if (expectedPo !== '-1' && po.toUpperCase() !== expectedPo.toUpperCase()) humanRequired = true;\n  return {\n    heatNumber: toString(row.heatNumber), chemicals, yieldStrength02: toNumber(row.yieldStrength02), yieldStrength10: toNumber(row.yieldStrength10), tensileStrength: toNumber(row.tensileStrength), elongation: toNumber(row.elongation), certificateNumber: toString(row.certificateNumber), quantity: Math.round(toNumber(row.quantity) * 100) / 100, creditor: toString(row.creditor), product: toString(row.product), humanRequired, customerOrderNumber: po, dimensions, werkstoff1: toString(row.werkstoff1), werkstoff2: toString(row.werkstoff2), werkstoff3: toString(row.werkstoff3), werkstoff4: toString(row.werkstoff4), werkstoff5: toString(row.werkstoff5), norm1: toString(row.norm1), norm2: toString(row.norm2), norm3: toString(row.norm3), norm4: toString(row.norm4), norm5: toString(row.norm5)\n  };\n});\nconst result = { correlationKey: context.correlationKey, generatedAt: new Date().toISOString(), mineru: { endpoint: context.pair.certificate.mineruEndpoint, model: context.pair.certificate.mineruModel }, llm: { endpoint: 'https://llm-inference.daimension.ai/v1/chat/completions', model: 'deepseek-v4-flash-3107' }, sourceMails: { certificate: { id: context.pair.certificate.mailId, subject: context.pair.certificate.subject, fileName: context.pair.certificate.fileName }, additionalInfo: context.pair.additionalInfo ? { id: context.pair.additionalInfo.mailId, subject: context.pair.additionalInfo.subject } : null }, results: normalized };\nconst state = $getWorkflowStaticData('global');\nif (state.pendingCertificatePairs) delete state.pendingCertificatePairs[context.correlationKey];\nconst jsonText = JSON.stringify(result, null, 2);\nconst safeName = String(context.correlationKey).replace(/[^A-Za-z0-9._-]+/g, '_');\nreturn [{ json: { ...result, replyMailId: context.replyMailId, replyText: `Die Zertifikatsanalyse für ${context.correlationKey} ist abgeschlossen. ${normalized.length} Schmelzen-/Mengenzeile(n) wurden extrahiert. Datensätze mit humanRequired=true müssen manuell geprüft werden. Das vollständige JSON ist angehängt.` }, binary: { result: { data: Buffer.from(jsonText).toString('base64'), mimeType: 'application/json', fileName: `certificate-analysis-${safeName}.json` } } }];"
+          "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object') return value;\n  const text = String(value ?? '').trim().replace(/^\\`\\`\\`(?:json)?\\s*/i, '').replace(/\\s*\\`\\`\\`$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Prüfung enthält kein valides JSON.');\n}\nconst response = $input.first().json;\nconst context = $('Qualitätsprüfung vorbereiten').first().json;\nconst envelope = parseJson(response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response);\nconst rows = Array.isArray(envelope) ? envelope : (Array.isArray(envelope.results) ? envelope.results : []);\nif (!rows.length) throw new Error('Die geprüfte Antwort enthält keine Ergebniszeilen.');\nconst chemicalKeys = ['C','SI','S','P','SN','MN','CR','NI','MO','TI','CO','CU','N','AL','V','NB','B','Zr','W','Sb','As','AL/N','Nb+(V2,5)','Nb+V+Ti','Mn/C','CEV','V+NB','Ni+Cu','Cu+Ni+Cr+Mo+V','Cr+Cu+Mo+Ni','Cu+Mo'];\nconst toNumber = (value) => { const n = typeof value === 'number' ? value : Number(String(value ?? '').trim().replace(',', '.').replace(/^[<>≈~]\\s*/, '').replace(/\\s*(?:MPa|%|m|pcs?)$/i, '')); return Number.isFinite(n) && n >= -1 ? n : -1; };\nconst toString = (value) => { const text = String(value ?? '').trim(); return text && text.toLowerCase() !== 'null' ? text : '-1'; };\nconst normalized = rows.map((row) => {\n  const chemicals = {};\n  for (const key of chemicalKeys) { const aliases = [key, key.toUpperCase()]; let value = -1; for (const alias of aliases) if (row.chemicals && Object.prototype.hasOwnProperty.call(row.chemicals, alias)) value = toNumber(row.chemicals[alias]); chemicals[key] = value; }\n  const dimensionsRaw = toString(row.dimensions);\n  const dm = dimensionsRaw.match(/(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:mm[^0-9]*)?(?:x|×|\\/)\\s*(\\d{1,4}(?:[.,]\\d+)?)/i);\n  const dimensions = dimensionsRaw === '-1' ? '-1' : (dm ? dm[1].replace(',', '.') + ' x ' + dm[2].replace(',', '.') + ' mm' : '-1');\n  let humanRequired = row.humanRequired === true || (dimensions === '-1' && dimensionsRaw !== '-1');\n  const po = toString(row.customerOrderNumber);\n  const expectedPo = toString(context.orderData?.poNumber);\n  if (expectedPo !== '-1' && po.toUpperCase() !== expectedPo.toUpperCase()) humanRequired = true;\n  return {\n    heatNumber: toString(row.heatNumber), chemicals, yieldStrength02: toNumber(row.yieldStrength02), yieldStrength10: toNumber(row.yieldStrength10), tensileStrength: toNumber(row.tensileStrength), elongation: toNumber(row.elongation), certificateNumber: toString(row.certificateNumber), quantity: Math.round(toNumber(row.quantity) * 100) / 100, creditor: toString(row.creditor), product: toString(row.product), humanRequired, customerOrderNumber: po, dimensions, werkstoff1: toString(row.werkstoff1), werkstoff2: toString(row.werkstoff2), werkstoff3: toString(row.werkstoff3), werkstoff4: toString(row.werkstoff4), werkstoff5: toString(row.werkstoff5), norm1: toString(row.norm1), norm2: toString(row.norm2), norm3: toString(row.norm3), norm4: toString(row.norm4), norm5: toString(row.norm5)\n  };\n});\nconst result = { correlationKey: context.correlationKey, generatedAt: new Date().toISOString(), mineru: { endpoint: context.pair.certificate.mineruEndpoint, model: context.pair.certificate.mineruModel }, llm: { endpoint: 'https://llm-inference.daimension.ai/v1/chat/completions', model: 'deepseek-v4-flash-3107' }, sourceMails: { certificate: { id: context.pair.certificate.mailId, subject: context.pair.certificate.subject, fileName: context.pair.certificate.fileName }, additionalInfo: context.pair.additionalInfo ? { id: context.pair.additionalInfo.mailId, subject: context.pair.additionalInfo.subject } : null }, results: normalized };\nreturn [{ json: { ...result, replyMailId: context.replyMailId } }];"
         },
         "id": "c91a7110-cdba-4c01-8b7e-87eab393a27c",
-        "name": "Ergebnis validieren und JSON bauen",
+        "name": "Ergebnis validieren und Dokumentenreview vorbereiten",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
           3640,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "append",
+          "options": {}
+        },
+        "id": "1bf4c05d-d918-4959-b74a-1e092e8efdc0",
+        "name": "Original-PDF und Analyse zusammenführen",
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          3900,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const items = $input.all();\nconst pdfIndex = items.findIndex(item => item.binary?.data);\nconst analysisItem = items.find(item => Array.isArray(item.json?.results));\nif (pdfIndex < 0) throw new Error('Das Original-PDF fehlt für den Dokumentenreview.');\nif (!analysisItem) throw new Error('Die finalen Analysewerte fehlen für den Dokumentenreview.');\nconst pdfBuffer = await this.helpers.getBinaryDataBuffer(pdfIndex, 'data');\nif (pdfBuffer.length < 5 || pdfBuffer.subarray(0, 5).toString('ascii') !== '%PDF-') throw new Error('Für den Dokumentenreview wurde keine gültige PDF-Datei bereitgestellt.');\nconst sourceBinary = items[pdfIndex].binary.data;\nconst rawName = String(sourceBinary.fileName ?? analysisItem.json.sourceMails?.certificate?.fileName ?? 'certificate.pdf').normalize('NFC');\nconst baseName = rawName.replace(/\\.pdf$/i, '').replace(/[\\\\/:*?\\\"<>|\\u0000-\\u001F\\u007F]+/g, '_').replace(/[.\\s]+$/g, '').trim() || 'certificate';\nlet fileName = baseName + '.pdf';\nwhile (Buffer.byteLength(fileName, 'utf8') > 240 && baseName.length > 1) fileName = baseName.slice(0, Math.max(1, baseName.length - 1)) + '.pdf';\nconst materializedPdf = await this.helpers.prepareBinaryData(pdfBuffer, fileName, 'application/pdf');\nconst reviewAnalysis = analysisItem.json.results.map(row => ({ ...row, humanRequired: true }));\nconst sourceMailId = String(analysisItem.json.sourceMails?.certificate?.id ?? analysisItem.json.correlationKey ?? 'certificate');\nconst clientRequestId = ('n8n-certificate-' + sourceMailId).replace(/[^A-Za-z0-9._:-]+/g, '-').slice(0, 120);\nconst certificateNumber = reviewAnalysis.find(row => row.certificateNumber && row.certificateNumber !== '-1')?.certificateNumber;\nconst rawTitle = certificateNumber ? 'Zertifikat ' + certificateNumber : 'Zertifikat ' + analysisItem.json.correlationKey;\nconst title = rawTitle.slice(0, 240);\nreturn [{\n  json: {\n    ...analysisItem.json,\n    results: reviewAnalysis,\n    reviewCreateRequest: { title, fileName, contentType: 'application/pdf', sizeBytes: pdfBuffer.length, clientRequestId, analysis: reviewAnalysis }\n  },\n  binary: { data: materializedPdf }\n}];"
+        },
+        "id": "ba44b5ca-7745-4629-ac46-d1106bcf8aa2",
+        "name": "Dokumentenreview-Upload vorbereiten",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4160,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://buhlmann-document-review.daimension.ai/api/v1/documents",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { ...$json.reviewCreateRequest, clientRequestId: 'n8n-certificate-execution-' + $execution.id } }}",
+          "options": {
+            "timeout": 60000
+          }
+        },
+        "id": "b98aa270-04a6-4e73-b2cc-76eaa9f6d407",
+        "name": "Dokumentenreview anlegen",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          4420,
+          80
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+          "id": "2GhCkGbqxuSjxHPm",
+          "name": "Buhlmann Document Review Bearer Auth v2"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const created = $input.first().json;\nconst source = $('Dokumentenreview-Upload vorbereiten').first();\nconst document = created.document;\nif (!document?.id) throw new Error('Das Document Review Tool lieferte keine Dokument-ID.');\nconst uploadRequired = document.uploadState === 'pending' && typeof created.uploadUrl === 'string' && created.uploadUrl.length > 0;\nif (!uploadRequired && document.uploadState !== 'ready') throw new Error('Der Dokumentenreview-Upload befindet sich in einem unerwarteten Zustand: ' + String(document.uploadState));\nreturn [{ json: { ...source.json, documentUpload: created, uploadRequired }, binary: source.binary }];"
+        },
+        "id": "159ddf16-ac56-437a-9800-452531376e4d",
+        "name": "Review-Uploadantwort mit PDF verbinden",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4680,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "3790f2f6-e278-4ab7-98ea-21982af1cd35",
+                "leftValue": "={{ $json.uploadRequired }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "34ea155f-6402-4ab7-b80c-5200b5d13baf",
+        "name": "PDF-Upload erforderlich?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          4940,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "={{ 'https://buhlmann-document-review.daimension.ai/api/v1/documents/' + $('Dokumentenreview anlegen').first().json.document.id + '/upload' }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/pdf"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "binaryData",
+          "inputDataFieldName": "data",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "text"
+              }
+            },
+            "timeout": 180000
+          }
+        },
+        "id": "b649f9dc-af49-4b49-b2c5-bf08bc126594",
+        "name": "Original-PDF in Review-Speicher hochladen",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5200,
+          0
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+          "id": "2GhCkGbqxuSjxHPm",
+          "name": "Buhlmann Document Review Bearer Auth v2"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://buhlmann-document-review.daimension.ai/api/v1/documents/' + $('Dokumentenreview anlegen').first().json.document.id + '/complete' }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 180000
+          }
+        },
+        "id": "648aa38e-6b49-4db5-a53d-e50450f1847d",
+        "name": "Dokumentenreview-Upload abschließen",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5460,
+          0
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+          "id": "2GhCkGbqxuSjxHPm",
+          "name": "Buhlmann Document Review Bearer Auth v2"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const source = $('Dokumentenreview-Upload vorbereiten').first().json;\nconst created = $('Dokumentenreview anlegen').first().json;\nconst document = created.document;\nif (!document?.id) throw new Error('Der angelegte Dokumentenreview enthält keine Dokument-ID.');\nconst completed = $input.first().json;\nconst result = {\n  correlationKey: source.correlationKey,\n  generatedAt: source.generatedAt,\n  mineru: source.mineru,\n  llm: source.llm,\n  documentReview: {\n    id: document.id,\n    url: 'https://buhlmann-document-review.daimension.ai/document-review',\n    apiUrl: 'https://buhlmann-document-review.daimension.ai/api/v1/documents/' + document.id,\n    status: completed.status ?? document.status ?? 'draft',\n    uploadState: completed.uploadState ?? document.uploadState ?? 'ready',\n    analysisRevision: completed.analysisRevision ?? document.analysisRevision ?? 1,\n    purpose: 'Manueller Abgleich von Originaldokument und extrahierten Werten'\n  },\n  sourceMails: source.sourceMails,\n  results: source.results\n};\nconst state = $getWorkflowStaticData('global');\nif (state.pendingCertificatePairs) delete state.pendingCertificatePairs[result.correlationKey];\nconst jsonText = JSON.stringify(result, null, 2);\nconst safeName = String(result.correlationKey).replace(/[^A-Za-z0-9._-]+/g, '_');\nconst replyText = 'Die Zertifikatsanalyse für ' + result.correlationKey + ' ist abgeschlossen. ' + result.results.length + ' Schmelzen-/Mengenzeile(n) wurden extrahiert. Das Original-PDF und die extrahierten Werte stehen jetzt im BUHLMANN Dokumentenreview zur manuellen Gegenprüfung bereit. Review-ID: ' + document.id + '\\n\\nhttps://buhlmann-document-review.daimension.ai/document-review\\n\\nAlle Datensätze sind zunächst mit humanRequired=true markiert und müssen im Review bestätigt oder korrigiert werden. Das vollständige JSON ist angehängt.';\nreturn [{ json: { ...result, replyMailId: source.replyMailId, replyText }, binary: { result: { data: Buffer.from(jsonText).toString('base64'), mimeType: 'application/json', fileName: 'certificate-analysis-' + safeName + '.json' } } }];"
+        },
+        "id": "9f7e0925-6a92-4ab0-adf3-c226b37d967b",
+        "name": "Dokumentenreview im Ergebnis verknüpfen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5720,
           80
         ]
       },
@@ -1933,7 +2433,7 @@
         "type": "n8n-nodes-base.microsoftOutlook",
         "typeVersion": 2,
         "position": [
-          3900,
+          5980,
           80
         ],
         "credentials": {
@@ -2037,6 +2537,11 @@
           [
             {
               "node": "PDF bei MinerU einreichen",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Original-PDF und Analyse zusammenführen",
               "type": "main",
               "index": 0
             }
@@ -2241,18 +2746,7 @@
         "main": [
           [
             {
-              "node": "Ergebnis validieren und JSON bauen",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Ergebnis validieren und JSON bauen": {
-        "main": [
-          [
-            {
-              "node": "Ergebnis per Outlook senden",
+              "node": "Ergebnis validieren und Dokumentenreview vorbereiten",
               "type": "main",
               "index": 0
             }
@@ -2263,6 +2757,112 @@
         "main": [
           []
         ]
+      },
+      "Ergebnis validieren und Dokumentenreview vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "Original-PDF und Analyse zusammenführen",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Original-PDF und Analyse zusammenführen": {
+        "main": [
+          [
+            {
+              "node": "Dokumentenreview-Upload vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Dokumentenreview-Upload vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "Dokumentenreview anlegen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Dokumentenreview anlegen": {
+        "main": [
+          [
+            {
+              "node": "Review-Uploadantwort mit PDF verbinden",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Review-Uploadantwort mit PDF verbinden": {
+        "main": [
+          [
+            {
+              "node": "PDF-Upload erforderlich?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PDF-Upload erforderlich?": {
+        "main": [
+          [
+            {
+              "node": "Original-PDF in Review-Speicher hochladen",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Dokumentenreview im Ergebnis verknüpfen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Original-PDF in Review-Speicher hochladen": {
+        "main": [
+          [
+            {
+              "node": "Dokumentenreview-Upload abschließen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Dokumentenreview-Upload abschließen": {
+        "main": [
+          [
+            {
+              "node": "Dokumentenreview im Ergebnis verknüpfen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Dokumentenreview im Ergebnis verknüpfen": {
+        "main": [
+          [
+            {
+              "node": "Ergebnis per Outlook senden",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "nodeGroups": [],
@@ -2272,18 +2872,34 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-08-06T08:44:31.059Z",
-        "id": 24,
+        "createdAt": "2026-08-12T11:26:46.721Z",
+        "id": 30,
         "workflowId": "oLtOyTcKU11RrNJC",
-        "versionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
+        "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
         "event": "deactivated",
         "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
       },
       {
-        "createdAt": "2026-08-06T08:44:33.475Z",
-        "id": 25,
+        "createdAt": "2026-08-12T11:26:49.838Z",
+        "id": 31,
         "workflowId": "oLtOyTcKU11RrNJC",
-        "versionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
+        "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
+        "event": "activated",
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      },
+      {
+        "createdAt": "2026-08-12T11:26:49.937Z",
+        "id": 32,
+        "workflowId": "oLtOyTcKU11RrNJC",
+        "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
+        "event": "deactivated",
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      },
+      {
+        "createdAt": "2026-08-12T11:26:50.174Z",
+        "id": 33,
+        "workflowId": "oLtOyTcKU11RrNJC",
+        "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
         "event": "activated",
         "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
       }
