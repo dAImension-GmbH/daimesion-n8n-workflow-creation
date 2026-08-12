@@ -1,0 +1,2292 @@
+{
+  "updatedAt": "2026-08-06T08:44:30.971Z",
+  "createdAt": "2026-08-05T13:45:59.513Z",
+  "id": "oLtOyTcKU11RrNJC",
+  "name": "Outlook Certificate Analysis (MinerU + DeepSeek)",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Einrichtung\n1. **Microsoft Outlook OAuth2** ist am Trigger und an allen Outlook-Antwort-Nodes zugeordnet.\n2. Das Credential **Daimension LLM Bearer Auth** ist für `llm-inference.daimension.ai` und `pdf.daimension.ai` freigegeben.\n3. Aktivieren. Der Workflow lädt PDF-Anhänge herunter; jede Zertifikatsmail wird **unabhängig** analysiert, sobald ihr PDF-Anhang per MinerU als Text extrahiert wurde. Getrennt eintreffende Zusatz-/Bestelldaten-Mails werden gespeichert und bestätigt, verzögern die Analyse aber nicht.\n\nPDFs werden in Dataset **4037** unter einer stabil aus der Mail-Korrelation abgeleiteten Case-Nummer gespeichert. Der Workflow pollt die asynchrone MinerU-Extraktion und sendet Text, Markdown oder JSON sofort als Mailtext und vollständigen Anhang an den Absender zurück. Die strukturierte Auswertung verwendet `deepseek-v4-flash-3107` bei dAImension.ai. Zusatzinfo-Mails erhalten eine Bestätigung; das finale Analyse-JSON wird per Outlook zurückgesendet.",
+        "height": 420,
+        "width": 520,
+        "color": 5
+      },
+      "id": "97e2346e-cc57-40f1-a56d-01c1c1c59e11",
+      "name": "Einrichtung und Datenfluss",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "event": "messageReceived",
+        "output": "fields",
+        "fields": [
+          "id",
+          "conversationId",
+          "internetMessageId",
+          "subject",
+          "body",
+          "bodyPreview",
+          "from",
+          "sender",
+          "receivedDateTime",
+          "hasAttachments"
+        ],
+        "filters": {
+          "readStatus": "both"
+        },
+        "options": {
+          "downloadAttachments": true,
+          "attachmentsPrefix": "attachment_"
+        }
+      },
+      "id": "44d3c956-4afd-4ac1-a5bb-c7196ca87767",
+      "name": "Neue Outlook Mail",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        120
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "GDh0WTvXD06I3uyw",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst mail = item.json ?? {};\nconst stripHtml = (value) => String(value ?? '').replace(/<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<script[\\s\\S]*?<\\/script>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/\\s+/g, ' ').trim();\nconst binaryEntries = Object.entries(item.binary ?? {});\nconst pdf = binaryEntries.find(([, file]) => {\n  const mime = String(file?.mimeType ?? '').toLowerCase();\n  const name = String(file?.fileName ?? '').toLowerCase();\n  return mime === 'application/pdf' || name.endsWith('.pdf');\n});\nconst bodyText = stripHtml(mail.body?.content ?? mail.body ?? mail.bodyPreview);\nconst subject = String(mail.subject ?? '').trim();\nconst from = mail.from?.emailAddress ?? mail.sender?.emailAddress ?? mail.from ?? null;\nconst fileName = pdf?.[1]?.fileName ?? null;\nconst classifierSystem = [\n  'Du klassifizierst E-Mails für eine Werkstoffzeugnis-Pipeline.',\n  'Zertifikatsmails enthalten gewöhnlich einen PDF-Anhang; Zusatzinfo-Mails enthalten Bestellung, Positionen, Werkstoff, Norm oder Referenzen.',\n  'Getrennte Mails müssen über dieselbe PO-/Bestell-/Referenznummer korreliert werden.',\n  'Bevorzuge eine PO-Nummer wie PO-26-RFS004402, danach Bestell- oder Auftragsnummern. Verwende conversationId nur als letzte Möglichkeit.',\n  'Antworte ausschließlich als JSON-Objekt.'\n].join(' ');\nconst classifierUser = JSON.stringify({\n  subject,\n  body: bodyText.slice(0, 30000),\n  from,\n  conversationId: mail.conversationId ?? null,\n  hasPdf: Boolean(pdf),\n  pdfFileName: fileName\n});\nreturn [{\n  json: {\n    mailId: mail.id,\n    conversationId: mail.conversationId ?? null,\n    internetMessageId: mail.internetMessageId ?? null,\n    subject,\n    bodyText,\n    from,\n    receivedDateTime: mail.receivedDateTime ?? new Date().toISOString(),\n    hasPdf: Boolean(pdf),\n    pdfFileName: fileName,\n    llmRequest: {\n      model: 'deepseek-v4-flash-3107',\n      temperature: 0,\n      max_tokens: 1800,\n      response_format: { type: 'json_object' },\n      messages: [\n        { role: 'system', content: classifierSystem },\n        { role: 'user', content: [\n          classifierUser,\n          '',\n          'Schema:',\n          JSON.stringify({\n            kind: 'certificate | additional_info | unknown',\n            correlationKey: 'gemeinsame PO-/Referenznummer oder -1',\n            poNumber: 'PO-Nummer oder -1',\n            orderData: { poNumber: 'string oder -1', lines: [{ lineNumber: 'number oder -1', description1: 'string oder null', description2: 'string oder null', properties: [{ propertyCode: 'string', value: 'string' }] }] },\n            confidence: 0.0,\n            notes: ['string']\n          })\n        ].join('\\n') }\n      ]\n    }\n  },\n  binary: pdf ? { data: pdf[1] } : {}\n}];"
+      },
+      "id": "6600842d-e2e9-432a-a03e-c0471dc7db43",
+      "name": "Mail vorbereiten",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "159d7f44-64c4-40b0-bc87-99521ab714cf",
+              "leftValue": "={{ String($json.from?.address ?? '').trim() }}",
+              "rightValue": "certificates@daimension.de",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "59e10783-b3dd-4c2d-ab8f-531309320737",
+      "name": "Eigene Mail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.llmRequest }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "fcf26cfb-31a8-4a5f-b494-f93e049d5ca9",
+      "name": "Mail mit DeepSeek einordnen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        120
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "pAOBlEBSCcHS5Do1",
+          "name": "Daimension LLM Bearer Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst original = $('Mail vorbereiten').first();\nfunction parseJson(value) {\n  if (value && typeof value === 'object') return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{');\n  const end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  return {};\n}\nconst raw = response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response;\nconst classification = parseJson(raw);\nconst hasPdf = Boolean(original.json.hasPdf);\nlet kind = String(classification.kind ?? 'unknown').toLowerCase();\nif (hasPdf) kind = 'certificate';\nconst po = String(classification.poNumber ?? classification.orderData?.poNumber ?? '').trim();\nconst key = String(classification.correlationKey ?? '').trim();\nconst fallbackKey = original.json.conversationId || original.json.internetMessageId || original.json.mailId;\nconst correlationKey = (key && key !== '-1' ? key : (po && po !== '-1' ? po : fallbackKey)).toUpperCase();\nreturn [{\n  json: {\n    ...original.json,\n    classification: {\n      ...classification,\n      kind,\n      correlationKey,\n      poNumber: po || '-1',\n      orderData: classification.orderData && typeof classification.orderData === 'object' ? classification.orderData : { poNumber: po || '-1', lines: [] }\n    },\n    isCertificate: kind === 'certificate',\n    correlationKey\n  },\n  binary: original.binary ?? {}\n}];"
+      },
+      "id": "34045107-afde-49e5-a2a9-50b26f46cd03",
+      "name": "Einordnung lesen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b2203b27-aab2-4125-9849-f67000518976",
+              "leftValue": "={{ $json.isCertificate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "f4ae166b-b906-4bbd-9f89-7c713b4915e3",
+              "leftValue": "={{ $json.hasPdf }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "98ee27ed-bab6-4604-9a97-7aca51414c9b",
+      "name": "Zertifikatsmail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1fbde6b1-a17d-4de1-acdd-6fb3ecdf8089",
+              "leftValue": "={{ $json.classification.kind ?? 'unknown' }}",
+              "rightValue": "additional_info",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b12c669b-7d5a-4693-a10e-93c6dc5e9455",
+      "name": "Zusatzinfo-Mail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1300,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst sourceBinary = item.binary?.data;\nif (!sourceBinary) {\n  throw new Error('Der Zertifikatsmail fehlt der PDF-Binäranhang im Feld data.');\n}\nconst pdfBuffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (pdfBuffer.length < 5 || pdfBuffer.subarray(0, 5).toString('ascii') !== '%PDF-') {\n  throw new Error(`Der Outlook-Anhang ist keine gültige PDF-Datei (Bytes: ${pdfBuffer.length}).`);\n}\nconst fileName = sourceBinary.fileName ?? item.json.pdfFileName ?? 'certificate.pdf';\nconst materializedPdf = await this.helpers.prepareBinaryData(pdfBuffer, fileName, 'application/pdf');\nconst key = String(item.json.correlationKey ?? item.json.mailId ?? item.json.receivedDateTime ?? 'certificate').trim().toUpperCase();\nlet hash = 2166136261;\nfor (let index = 0; index < key.length; index++) {\n  hash ^= key.charCodeAt(index);\n  hash = Math.imul(hash, 16777619) >>> 0;\n}\nconst caseNumber = (hash % 2147483646) + 1;\nreturn [{\n  json: {\n    ...item.json,\n    pdfDatasetId: 4037,\n    pdfCaseNumber: caseNumber,\n    pdfDescription: `Werkstoffzeugnis aus Outlook: ${item.json.subject ?? item.json.pdfFileName ?? key}`,\n    pdfAdditionalInformation: JSON.stringify({\n      correlationKey: key,\n      poNumber: item.json.classification?.poNumber ?? '-1',\n      sender: item.json.from ?? null,\n      receivedDateTime: item.json.receivedDateTime ?? null,\n      mailId: item.json.mailId ?? null\n    }),\n    pdfUploadBytes: pdfBuffer.length\n  },\n  binary: { data: materializedPdf }\n}];"
+      },
+      "id": "832f709f-c657-49d8-907e-d1def712ac1d",
+      "name": "PDF-Upload vorbereiten",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://pdf.daimension.ai/api/v1/documents/pdf",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "dataset_id",
+              "value": "={{ $json.pdfDatasetId }}"
+            },
+            {
+              "name": "case_number",
+              "value": "={{ $json.pdfCaseNumber }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $json.pdfDescription }}"
+            },
+            {
+              "name": "additional_information",
+              "value": "={{ $json.pdfAdditionalInformation }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "7c471f8e-0d91-4dd4-a3a4-e99270509187",
+      "name": "PDF bei MinerU einreichen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        -380
+      ],
+      "notesInFlow": true,
+      "notes": "Lädt das Zertifikat in Dataset 4037 hoch. Der PDF-Dienst erzeugt asynchron einen MinerU-Extraktionsjob.",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "pAOBlEBSCcHS5Do1",
+          "name": "Daimension LLM Bearer Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "id": "b0cbb67d-3cef-4b4e-95b1-14779f5c3053",
+      "name": "Auf MinerU warten",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1820,
+        -380
+      ],
+      "webhookId": "95da276a-786d-4b93-8133-1d8df8caf4c4"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://pdf.daimension.ai/api/v1/documents/' + $('PDF bei MinerU einreichen').first().json.sample_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "6fd55a5d-3950-4936-bb2e-743700ca34a8",
+      "name": "MinerU-Status prüfen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        -380
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "pAOBlEBSCcHS5Do1",
+          "name": "Daimension LLM Bearer Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3f752024-5403-4617-92df-d2b7a4ff8db0",
+              "leftValue": "={{ $json.extraction_status ?? $json.status ?? '' }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a330d95d-aa89-422f-87cc-1866bad93caf",
+      "name": "MinerU fertig?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2340,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "baf79b40-661c-48fe-97df-b9795c7f619a",
+              "leftValue": "={{ $json.extraction_status ?? $json.status ?? '' }}",
+              "rightValue": "failed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f1ead0c3-b27d-4912-8797-d82ece958d13",
+      "name": "MinerU fehlgeschlagen?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2600,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://pdf.daimension.ai/api/v1/documents/' + $('PDF bei MinerU einreichen').first().json.sample_id + '/result?format=json&include_blocks=false' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "2f51fb11-5358-4408-a9d7-2b0747b1ab55",
+      "name": "PDF mit MinerU lesen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2600,
+        -500
+      ],
+      "notesInFlow": true,
+      "notes": "Liest nach erfolgreichem asynchronen Job die aggregierte MinerU-Ausgabe als Markdown, Klartext und Seitendaten.",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "pAOBlEBSCcHS5Do1",
+          "name": "Daimension LLM Bearer Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const status = $input.first().json ?? {};\nconst original = $('Einordnung lesen').first().json;\nconst detail = status.extraction_error ?? status.error ?? status.message ?? 'Unbekannter Fehler';\nreturn [{ json: { replyMailId: original.mailId, replyText: `Die Zertifikatsextraktion mit MinerU ist fehlgeschlagen.\\n\\n${String(detail)}` } }];"
+      },
+      "id": "2bd36d07-86f1-458d-a310-70151c3bbe53",
+      "name": "MinerU-Fehler vorbereiten",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $json.replyMailId }}",
+          "mode": "id"
+        },
+        "replyToSenderOnly": true,
+        "message": "={{ $json.replyText }}",
+        "additionalFields": {
+          "bodyContentType": "Text"
+        }
+      },
+      "id": "09f4e841-764b-43c3-b479-31956e7562fe",
+      "name": "MinerU-Fehler an Absender",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        -180
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "GDh0WTvXD06I3uyw",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "webhookId": "aa6d979c-cecc-4387-9bef-b53cb3d4812c"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst original = $('Einordnung lesen').first().json;\nfunction firstText(value) {\n  if (typeof value === 'string' && value.trim()) return value.trim();\n  if (Array.isArray(value)) {\n    for (const entry of value) { const found = firstText(entry); if (found) return found; }\n  }\n  if (value && typeof value === 'object') {\n    for (const key of ['markdown','text','extracted_text','extractedText','content','output_text','result','data']) {\n      const found = firstText(value[key]);\n      if (found) return found;\n    }\n    const choice = value.choices?.[0]?.message?.content ?? value.choices?.[0]?.text;\n    if (typeof choice === 'string' && choice.trim()) return choice.trim();\n  }\n  return '';\n}\nconst extracted = firstText(response);\nlet content;\nlet extension;\nlet mimeType;\nlet formatLabel;\nif (extracted) {\n  content = extracted;\n  try {\n    JSON.parse(extracted);\n    extension = 'json';\n    mimeType = 'application/json';\n    formatLabel = 'JSON';\n  } catch {\n    const looksMarkdown = /(^|\\n)#{1,6}\\s|\\|.+\\||(^|\\n)[*-]\\s+/m.test(extracted);\n    extension = looksMarkdown ? 'md' : 'txt';\n    mimeType = looksMarkdown ? 'text/markdown' : 'text/plain';\n    formatLabel = looksMarkdown ? 'Markdown' : 'Text';\n  }\n} else {\n  content = JSON.stringify(response, null, 2);\n  extension = 'json';\n  mimeType = 'application/json';\n  formatLabel = 'JSON';\n}\nconst sourceName = String(original.pdfFileName ?? 'certificate.pdf').replace(/\\.[^.]+$/, '');\nconst safeName = sourceName.replace(/[^A-Za-z0-9._-]+/g, '_') || 'certificate';\nconst previewLimit = 12000;\nconst preview = content.length > previewLimit ? `${content.slice(0, previewLimit)}\\n\\n[Mailvorschau gekürzt – vollständige Ausgabe siehe Anhang.]` : content;\nreturn [{\n  json: {\n    replyMailId: original.mailId,\n    replyText: `Die Zertifikatsextraktion ist abgeschlossen. Ausgabeformat: ${formatLabel}.\\n\\n${preview}`,\n    extractionFormat: formatLabel,\n    extractionFileName: `${safeName}-mineru.${extension}`\n  },\n  binary: {\n    extraction: {\n      data: Buffer.from(content, 'utf8').toString('base64'),\n      mimeType,\n      fileName: `${safeName}-mineru.${extension}`\n    }\n  }\n}];"
+      },
+      "id": "6d025169-3aec-4234-9468-d1f34e503f4a",
+      "name": "MinerU-Ausgabe für Antwort vorbereiten",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $json.replyMailId }}",
+          "mode": "id"
+        },
+        "replyToSenderOnly": true,
+        "message": "={{ $json.replyText }}",
+        "additionalFields": {
+          "bodyContentType": "Text",
+          "attachments": {
+            "attachments": [
+              {
+                "binaryPropertyName": "extraction"
+              }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "id": "cfb6cc71-34f0-4620-9433-c7212577f59a",
+      "name": "MinerU-Ausgabe an Absender",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        -180
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "GDh0WTvXD06I3uyw",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "webhookId": "2a498bea-e83c-4bdf-8277-9ba1175fcba1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst original = $('Einordnung lesen').first().json;\nfunction firstText(value) {\n  if (typeof value === 'string' && value.trim()) return value.trim();\n  if (Array.isArray(value)) { for (const entry of value) { const found = firstText(entry); if (found) return found; } }\n  if (value && typeof value === 'object') {\n    for (const key of ['markdown','text','extracted_text','extractedText','content','output_text','result','data']) { const found = firstText(value[key]); if (found) return found; }\n    const choice = value.choices?.[0]?.message?.content ?? value.choices?.[0]?.text;\n    if (typeof choice === 'string' && choice.trim()) return choice.trim();\n  }\n  return '';\n}\nconst markdown = firstText(response);\nif (!markdown) throw new Error('MinerU/PDF-Konverter lieferte keinen extrahierten Text.');\nconst poMatch = markdown.match(/\\bPO[-_ /]?[A-Z0-9-]{5,}\\b/i) || markdown.match(/(?:customer(?:'s)? order|kunden bestell|bestell(?:ung|nummer)?)[^A-Z0-9]{0,15}([A-Z0-9][A-Z0-9/_-]{5,})/i);\nconst documentKey = poMatch ? String(poMatch[1] ?? poMatch[0]).replace(/[_ ]/g, '-').toUpperCase() : original.correlationKey;\nconst state = $getWorkflowStaticData('global');\nstate.pendingCertificatePairs ??= {};\nconst now = Date.now();\nfor (const [key, value] of Object.entries(state.pendingCertificatePairs)) {\n  if (now - Number(value.updatedAt ?? 0) > 30 * 86400000) delete state.pendingCertificatePairs[key];\n}\nconst existing = state.pendingCertificatePairs[documentKey] ?? state.pendingCertificatePairs[original.correlationKey] ?? {};\nstate.pendingCertificatePairs[documentKey] = {\n  ...existing,\n  certificate: {\n    markdown,\n    mailId: original.mailId,\n    subject: original.subject,\n    fileName: original.pdfFileName,\n    receivedDateTime: original.receivedDateTime,\n    mineruModel: 'opendatalab/MinerU2.5-Pro-2605-1.2B',\n    mineruEndpoint: 'https://pdf.daimension.ai/api/v1/documents',\n    mineruSampleId: $('PDF bei MinerU einreichen').first().json.sample_id\n  },\n  updatedAt: now\n};\nif (documentKey !== original.correlationKey && state.pendingCertificatePairs[original.correlationKey]) delete state.pendingCertificatePairs[original.correlationKey];\nconst pair = state.pendingCertificatePairs[documentKey];\nreturn [{ json: { correlationKey: documentKey, replyMailId: original.mailId, pair } }];"
+      },
+      "id": "0b46f669-df1e-45d4-86fb-74263e478bc9",
+      "name": "Zertifikat zwischenspeichern",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst classification = input.classification ?? {};\nconst state = $getWorkflowStaticData('global');\nstate.pendingCertificatePairs ??= {};\nconst now = Date.now();\nfor (const [key, value] of Object.entries(state.pendingCertificatePairs)) {\n  if (now - Number(value.updatedAt ?? 0) > 30 * 86400000) delete state.pendingCertificatePairs[key];\n}\nconst key = input.correlationKey;\nconst existing = state.pendingCertificatePairs[key] ?? {};\nstate.pendingCertificatePairs[key] = {\n  ...existing,\n  additionalInfo: {\n    orderData: classification.orderData ?? { poNumber: classification.poNumber ?? '-1', lines: [] },\n    rawMailText: input.bodyText,\n    mailId: input.mailId,\n    subject: input.subject,\n    receivedDateTime: input.receivedDateTime,\n    classifierConfidence: classification.confidence ?? null,\n    classifierNotes: classification.notes ?? []\n  },\n  updatedAt: now\n};\nconst pair = state.pendingCertificatePairs[key];\nconst ready = Boolean(pair.certificate && pair.additionalInfo);\nreturn [{ json: { ready, correlationKey: key, replyMailId: input.mailId, pair: ready ? pair : null, pendingMessage: `Zusatz-/Bestelldaten für ${key} wurden gespeichert. Die Analyse läuft unabhängig davon, sobald die Zertifikatsmail mit dem PDF-Anhang verarbeitet ist.` } }];"
+      },
+      "id": "197ae6ec-20df-41c3-81a5-f7915ad141ee",
+      "name": "Zusatzinfo zwischenspeichern",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $json.replyMailId }}",
+          "mode": "id"
+        },
+        "replyToSenderOnly": true,
+        "message": "={{ $json.pendingMessage }}",
+        "additionalFields": {
+          "bodyContentType": "Text"
+        },
+        "options": {}
+      },
+      "id": "9ec952c1-2bc0-4c9c-bc59-7aa2daf8e6fb",
+      "name": "Bestätigung per Outlook",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        280
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "GDh0WTvXD06I3uyw",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "webhookId": "c7088a82-9b1a-4eb1-b44d-de056fbb927e"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst pair = input.pair;\nconst text = String(pair?.certificate?.markdown ?? '').replace(/\\r\\n?/g, '\\n').trim();\nif (!text) throw new Error('Im vollständigen Mail-Paar fehlt der Zertifikatstext.');\nconst maxChars = 12000;\nconst sections = text.split(/\\n-{3,}\\n+|\\n(?=##?\\s+(?:Seite|Page)\\b)/i).map(s => s.trim()).filter(Boolean);\nconst chunks = [];\nlet current = '';\nfor (const section of sections.length ? sections : [text]) {\n  if (section.length > maxChars) {\n    if (current) { chunks.push(current); current = ''; }\n    for (let offset = 0; offset < section.length; offset += maxChars) chunks.push(section.slice(offset, offset + maxChars));\n    continue;\n  }\n  const joined = current ? `${current}\\n\\n---\\n\\n${section}` : section;\n  if (joined.length > maxChars && current) { chunks.push(current); current = section; } else current = joined;\n}\nif (current) chunks.push(current);\nconst orderData = pair.additionalInfo?.orderData ?? {};\nconst rawMailText = pair.additionalInfo?.rawMailText ?? '';\nconst system = `Du bist ein spezialisierter Extraktor für Werkstoffzeugnisse. Erzeuge eine belegorientierte Zwischenrepräsentation, noch nicht das finale Kundenschema. Verwende ausschließlich den Zeugnistext als Quelle für Zeugniswerte; Bestelldaten sind nur Vergleichsdaten. Unterscheide Schmelzenanalyse (H/Heat) strikt von Produktanalyse (P/Product). Beachte Skalen X 100, X 1000 und X 10000; gib rawValue, scale und value aus. Ordne Chemie, Mengen und Zugversuche einer Schmelze zu. Bei Rohren ist die Menge die schmelzenspezifische Länge in Metern. Für Zugversuche bevorzuge +20 °C; bei Dehnung verwende Obtained, niemals Min. Kreditor ist Herstellerwerk, nicht Kunde. Erfasse OCR-Artefakte, Konflikte und Unsicherheiten. Antworte nur als JSON-Objekt mit certificate, heats, orderComparison, ocrArtifacts und uncertainties.`;\nreturn chunks.map((chunk, index) => ({ json: {\n  correlationKey: input.correlationKey,\n  replyMailId: input.replyMailId,\n  pair,\n  chunkIndex: index + 1,\n  chunkCount: chunks.length,\n  llmRequest: {\n    model: 'deepseek-v4-flash-3107', temperature: 0, max_tokens: 5000, response_format: { type: 'json_object' },\n    messages: [\n      { role: 'system', content: system },\n      { role: 'user', content: `<BLOCK index=\\\"${index + 1}\\\" total=\\\"${chunks.length}\\\">\\n<BESTELLDATEN>${JSON.stringify(orderData)}\\n${rawMailText}</BESTELLDATEN>\\n<ZEUGNISTEXT>${chunk}</ZEUGNISTEXT>\\n</BLOCK>` }\n    ]\n  }\n} }));"
+      },
+      "id": "32bcd57a-50cf-4458-a87a-d82b0f98642c",
+      "name": "Zeugnis in Belegblöcke teilen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.llmRequest }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "7dd58bf3-ff7d-47e3-947c-d6e797290d8a",
+      "name": "Belege mit DeepSeek extrahieren",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        80
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "pAOBlEBSCcHS5Do1",
+          "name": "Daimension LLM Bearer Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object' && !Array.isArray(value)) return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Belegantwort enthält kein valides JSON.');\n}\nconst responses = $input.all();\nconst sources = $('Zeugnis in Belegblöcke teilen').all();\nconst chunks = responses.map(item => parseJson(item.json.choices?.[0]?.message?.content ?? item.json.output_text ?? item.json.text ?? item.json));\nconst source = sources[0].json;\nconst orderData = source.pair.additionalInfo?.orderData ?? {};\nconst evidence = { chunks };\nconst schema = {\n  results: [{\n    heatNumber: 'string', chemicals: { C: 'number', SI: 'number', S: 'number', P: 'number', SN: 'number', MN: 'number', CR: 'number', NI: 'number', MO: 'number', TI: 'number', CO: 'number', CU: 'number', N: 'number', AL: 'number', V: 'number', NB: 'number', B: 'number', Zr: 'number', W: 'number', Sb: 'number', As: 'number', 'AL/N': 'number', 'Nb+(V2,5)': 'number', 'Nb+V+Ti': 'number', 'Mn/C': 'number', CEV: 'number', 'V+NB': 'number', 'Ni+Cu': 'number', 'Cu+Ni+Cr+Mo+V': 'number', 'Cr+Cu+Mo+Ni': 'number', 'Cu+Mo': 'number' },\n    yieldStrength02: 'number', yieldStrength10: 'number', tensileStrength: 'number', elongation: 'number', certificateNumber: 'string', quantity: 'number', creditor: 'string', product: 'string', humanRequired: 'boolean', customerOrderNumber: 'string', dimensions: 'OD x wall mm', werkstoff1: 'string', werkstoff2: 'string', werkstoff3: 'string', werkstoff4: 'string', werkstoff5: 'string', norm1: 'string', norm2: 'string', norm3: 'string', norm4: 'string', norm5: 'string'\n  }]\n};\nconst system = `Normalisiere belegorientierte Werkstoffzeugnisdaten in das vorgegebene MaterialAnalysis-Schema. Erzeuge genau ein Objekt pro Schmelze und schmelzenspezifischer Menge. Verwende nur H-/Heat-Chemie und deren bereits normalisierten value. Gib alle Chemieschlüssel aus; fehlende Zahlen -1. Bei Rohren ist quantity die schmelzenspezifische Länge in Metern. Mechanische Werte stammen bevorzugt aus Raumtemperaturmessungen; bei mehreren verwende pro Feld den kleinsten Wert. elongation ist Obtained, niemals Min. yieldStrength10 nur bei ausdrücklich 1,0 %. Kreditor ist ein einzelner Hersteller-String. Zeugniswerte niemals mit Bestelldaten auffüllen. Konflikte, OCR-Probleme und Unsicherheiten setzen humanRequired=true. dimensions ist Außendurchmesser x Wanddicke mm. Leere Werkstoff-/Normslots sind '-1'. Antworte nur als JSON-Objekt {\\\"results\\\":[...]}.`;\nreturn [{ json: { correlationKey: source.correlationKey, replyMailId: source.replyMailId, pair: source.pair, evidence, orderData, schema, llmRequest: { model: 'deepseek-v4-flash-3107', temperature: 0, max_tokens: 7000, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: `<ZIELSCHEMA>${JSON.stringify(schema)}</ZIELSCHEMA>\\n<BESTELLDATEN>${JSON.stringify(orderData)}</BESTELLDATEN>\\n<EXTRAHIERTE_BELEGE>${JSON.stringify(evidence)}</EXTRAHIERTE_BELEGE>` }] } } }];"
+      },
+      "id": "3d84f1ce-e403-4276-9be4-ab563131a66f",
+      "name": "Belege sammeln und Normalisierung bauen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.llmRequest }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "f491dcd3-00e4-478a-9947-8d7b79df76a3",
+      "name": "Mit DeepSeek normalisieren",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        80
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "pAOBlEBSCcHS5Do1",
+          "name": "Daimension LLM Bearer Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object' && !Array.isArray(value)) return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Normalisierung enthält kein valides JSON.');\n}\nconst response = $input.first().json;\nconst context = $('Belege sammeln und Normalisierung bauen').first().json;\nconst candidate = parseJson(response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response);\nconst system = `Du bist die abschließende Qualitätskontrolle für strukturierte Werkstoffzeugnisdaten. Prüfe den Kandidaten ausschließlich gegen Belege und Bestelldaten. Keine P-/Product-Analyse als Chemie; Skalen nicht erneut anwenden; Schmelzen und Mengen korrekt zuordnen; bei Rohren Meter; Dehnung Obtained statt Min.; Bestelldaten nie in Zeugnisfelder kopieren; Abweichungen/OCR/Mehrdeutigkeit setzen humanRequired=true; genau ein Herstellerkreditor; alle Pflicht- und Chemiefelder; fehlende Zahlen -1, Strings '-1'; keine Zusatzfelder. Korrigiere Fehler und antworte nur als JSON-Objekt {\\\"results\\\":[...]}.`;\nreturn [{ json: { ...context, candidate, llmRequest: { model: 'deepseek-v4-flash-3107', temperature: 0, max_tokens: 7000, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: `<ZIELSCHEMA>${JSON.stringify(context.schema)}</ZIELSCHEMA>\\n<BESTELLDATEN>${JSON.stringify(context.orderData)}</BESTELLDATEN>\\n<EXTRAHIERTE_BELEGE>${JSON.stringify(context.evidence)}</EXTRAHIERTE_BELEGE>\\n<KANDIDAT>${JSON.stringify(candidate)}</KANDIDAT>` }] } } }];"
+      },
+      "id": "e5e62bab-d960-4a17-9942-2c049ae28b3d",
+      "name": "Qualitätsprüfung vorbereiten",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.llmRequest }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "014c0dd5-b5fe-45e7-8c1f-0ad3b069e61b",
+      "name": "Mit DeepSeek prüfen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3380,
+        80
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "pAOBlEBSCcHS5Do1",
+          "name": "Daimension LLM Bearer Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object') return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Prüfung enthält kein valides JSON.');\n}\nconst response = $input.first().json;\nconst context = $('Qualitätsprüfung vorbereiten').first().json;\nconst envelope = parseJson(response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response);\nconst rows = Array.isArray(envelope) ? envelope : (Array.isArray(envelope.results) ? envelope.results : []);\nif (!rows.length) throw new Error('Die geprüfte Antwort enthält keine Ergebniszeilen.');\nconst chemicalKeys = ['C','SI','S','P','SN','MN','CR','NI','MO','TI','CO','CU','N','AL','V','NB','B','Zr','W','Sb','As','AL/N','Nb+(V2,5)','Nb+V+Ti','Mn/C','CEV','V+NB','Ni+Cu','Cu+Ni+Cr+Mo+V','Cr+Cu+Mo+Ni','Cu+Mo'];\nconst toNumber = (value) => { const n = typeof value === 'number' ? value : Number(String(value ?? '').trim().replace(',', '.').replace(/^[<>≈~]\\s*/, '').replace(/\\s*(?:MPa|%|m|pcs?)$/i, '')); return Number.isFinite(n) && n >= -1 ? n : -1; };\nconst toString = (value) => { const text = String(value ?? '').trim(); return text && text.toLowerCase() !== 'null' ? text : '-1'; };\nconst normalized = rows.map((row) => {\n  const chemicals = {};\n  for (const key of chemicalKeys) { const aliases = [key, key.toUpperCase()]; let value = -1; for (const alias of aliases) if (row.chemicals && Object.prototype.hasOwnProperty.call(row.chemicals, alias)) value = toNumber(row.chemicals[alias]); chemicals[key] = value; }\n  const dimensionsRaw = toString(row.dimensions);\n  const dm = dimensionsRaw.match(/(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:mm[^0-9]*)?(?:x|×|\\/)\\s*(\\d{1,4}(?:[.,]\\d+)?)/i);\n  const dimensions = dimensionsRaw === '-1' ? '-1' : (dm ? `${dm[1].replace(',', '.')} x ${dm[2].replace(',', '.')} mm` : '-1');\n  let humanRequired = row.humanRequired === true || (dimensions === '-1' && dimensionsRaw !== '-1');\n  const po = toString(row.customerOrderNumber);\n  const expectedPo = toString(context.orderData?.poNumber);\n  if (expectedPo !== '-1' && po.toUpperCase() !== expectedPo.toUpperCase()) humanRequired = true;\n  return {\n    heatNumber: toString(row.heatNumber), chemicals, yieldStrength02: toNumber(row.yieldStrength02), yieldStrength10: toNumber(row.yieldStrength10), tensileStrength: toNumber(row.tensileStrength), elongation: toNumber(row.elongation), certificateNumber: toString(row.certificateNumber), quantity: Math.round(toNumber(row.quantity) * 100) / 100, creditor: toString(row.creditor), product: toString(row.product), humanRequired, customerOrderNumber: po, dimensions, werkstoff1: toString(row.werkstoff1), werkstoff2: toString(row.werkstoff2), werkstoff3: toString(row.werkstoff3), werkstoff4: toString(row.werkstoff4), werkstoff5: toString(row.werkstoff5), norm1: toString(row.norm1), norm2: toString(row.norm2), norm3: toString(row.norm3), norm4: toString(row.norm4), norm5: toString(row.norm5)\n  };\n});\nconst result = { correlationKey: context.correlationKey, generatedAt: new Date().toISOString(), mineru: { endpoint: context.pair.certificate.mineruEndpoint, model: context.pair.certificate.mineruModel }, llm: { endpoint: 'https://llm-inference.daimension.ai/v1/chat/completions', model: 'deepseek-v4-flash-3107' }, sourceMails: { certificate: { id: context.pair.certificate.mailId, subject: context.pair.certificate.subject, fileName: context.pair.certificate.fileName }, additionalInfo: context.pair.additionalInfo ? { id: context.pair.additionalInfo.mailId, subject: context.pair.additionalInfo.subject } : null }, results: normalized };\nconst state = $getWorkflowStaticData('global');\nif (state.pendingCertificatePairs) delete state.pendingCertificatePairs[context.correlationKey];\nconst jsonText = JSON.stringify(result, null, 2);\nconst safeName = String(context.correlationKey).replace(/[^A-Za-z0-9._-]+/g, '_');\nreturn [{ json: { ...result, replyMailId: context.replyMailId, replyText: `Die Zertifikatsanalyse für ${context.correlationKey} ist abgeschlossen. ${normalized.length} Schmelzen-/Mengenzeile(n) wurden extrahiert. Datensätze mit humanRequired=true müssen manuell geprüft werden. Das vollständige JSON ist angehängt.` }, binary: { result: { data: Buffer.from(jsonText).toString('base64'), mimeType: 'application/json', fileName: `certificate-analysis-${safeName}.json` } } }];"
+      },
+      "id": "c91a7110-cdba-4c01-8b7e-87eab393a27c",
+      "name": "Ergebnis validieren und JSON bauen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3640,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $json.replyMailId }}",
+          "mode": "id"
+        },
+        "replyToSenderOnly": true,
+        "message": "={{ $json.replyText }}",
+        "additionalFields": {
+          "bodyContentType": "Text",
+          "attachments": {
+            "attachments": [
+              {
+                "binaryPropertyName": "result"
+              }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "id": "50c1aacd-b7c6-4336-b01c-354d1ef46ad1",
+      "name": "Ergebnis per Outlook senden",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        3900,
+        80
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "GDh0WTvXD06I3uyw",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "webhookId": "912aabd2-94be-47b3-b5e1-0ae37a773c43"
+    }
+  ],
+  "connections": {
+    "Neue Outlook Mail": {
+      "main": [
+        [
+          {
+            "node": "Mail vorbereiten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "Eigene Mail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eigene Mail?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Mail mit DeepSeek einordnen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail mit DeepSeek einordnen": {
+      "main": [
+        [
+          {
+            "node": "Einordnung lesen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Einordnung lesen": {
+      "main": [
+        [
+          {
+            "node": "Zertifikatsmail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zertifikatsmail?": {
+      "main": [
+        [
+          {
+            "node": "PDF-Upload vorbereiten",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Zusatzinfo-Mail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zusatzinfo-Mail?": {
+      "main": [
+        [
+          {
+            "node": "Zusatzinfo zwischenspeichern",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "PDF-Upload vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "PDF bei MinerU einreichen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF bei MinerU einreichen": {
+      "main": [
+        [
+          {
+            "node": "Auf MinerU warten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auf MinerU warten": {
+      "main": [
+        [
+          {
+            "node": "MinerU-Status prüfen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MinerU-Status prüfen": {
+      "main": [
+        [
+          {
+            "node": "MinerU fertig?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MinerU fertig?": {
+      "main": [
+        [
+          {
+            "node": "PDF mit MinerU lesen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MinerU fehlgeschlagen?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MinerU fehlgeschlagen?": {
+      "main": [
+        [
+          {
+            "node": "MinerU-Fehler vorbereiten",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Auf MinerU warten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MinerU-Fehler vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "MinerU-Fehler an Absender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MinerU-Fehler an Absender": {
+      "main": [
+        []
+      ]
+    },
+    "PDF mit MinerU lesen": {
+      "main": [
+        [
+          {
+            "node": "Zertifikat zwischenspeichern",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "MinerU-Ausgabe für Antwort vorbereiten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MinerU-Ausgabe für Antwort vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "MinerU-Ausgabe an Absender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MinerU-Ausgabe an Absender": {
+      "main": [
+        []
+      ]
+    },
+    "Zertifikat zwischenspeichern": {
+      "main": [
+        [
+          {
+            "node": "Zeugnis in Belegblöcke teilen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zusatzinfo zwischenspeichern": {
+      "main": [
+        [
+          {
+            "node": "Bestätigung per Outlook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zeugnis in Belegblöcke teilen": {
+      "main": [
+        [
+          {
+            "node": "Belege mit DeepSeek extrahieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Belege mit DeepSeek extrahieren": {
+      "main": [
+        [
+          {
+            "node": "Belege sammeln und Normalisierung bauen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Belege sammeln und Normalisierung bauen": {
+      "main": [
+        [
+          {
+            "node": "Mit DeepSeek normalisieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mit DeepSeek normalisieren": {
+      "main": [
+        [
+          {
+            "node": "Qualitätsprüfung vorbereiten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualitätsprüfung vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "Mit DeepSeek prüfen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mit DeepSeek prüfen": {
+      "main": [
+        [
+          {
+            "node": "Ergebnis validieren und JSON bauen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ergebnis validieren und JSON bauen": {
+      "main": [
+        [
+          {
+            "node": "Ergebnis per Outlook senden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bestätigung per Outlook": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Berlin",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:Neue Outlook Mail": {
+      "lastTimeChecked": "2026-08-06T10:44:31.088+02:00"
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
+  "activeVersionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
+  "versionCounter": 24,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-08-05T13:45:59.513Z",
+      "createdAt": "2026-08-05T13:45:59.513Z",
+      "role": "workflow:owner",
+      "workflowId": "oLtOyTcKU11RrNJC",
+      "projectId": "rQWJLyrY2gAKELRh",
+      "project": {
+        "updatedAt": "2026-08-05T13:21:12.673Z",
+        "createdAt": "2026-08-05T13:13:03.776Z",
+        "id": "rQWJLyrY2gAKELRh",
+        "name": "Maik Daniel Klause <maik.klaus@daimension.de>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-08-06T08:44:30.974Z",
+    "createdAt": "2026-08-06T08:44:30.974Z",
+    "versionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
+    "workflowId": "oLtOyTcKU11RrNJC",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "## Einrichtung\n1. **Microsoft Outlook OAuth2** ist am Trigger und an allen Outlook-Antwort-Nodes zugeordnet.\n2. Das Credential **Daimension LLM Bearer Auth** ist für `llm-inference.daimension.ai` und `pdf.daimension.ai` freigegeben.\n3. Aktivieren. Der Workflow lädt PDF-Anhänge herunter; jede Zertifikatsmail wird **unabhängig** analysiert, sobald ihr PDF-Anhang per MinerU als Text extrahiert wurde. Getrennt eintreffende Zusatz-/Bestelldaten-Mails werden gespeichert und bestätigt, verzögern die Analyse aber nicht.\n\nPDFs werden in Dataset **4037** unter einer stabil aus der Mail-Korrelation abgeleiteten Case-Nummer gespeichert. Der Workflow pollt die asynchrone MinerU-Extraktion und sendet Text, Markdown oder JSON sofort als Mailtext und vollständigen Anhang an den Absender zurück. Die strukturierte Auswertung verwendet `deepseek-v4-flash-3107` bei dAImension.ai. Zusatzinfo-Mails erhalten eine Bestätigung; das finale Analyse-JSON wird per Outlook zurückgesendet.",
+          "height": 420,
+          "width": 520,
+          "color": 5
+        },
+        "id": "97e2346e-cc57-40f1-a56d-01c1c1c59e11",
+        "name": "Einrichtung und Datenfluss",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -80,
+          -420
+        ]
+      },
+      {
+        "parameters": {
+          "event": "messageReceived",
+          "output": "fields",
+          "fields": [
+            "id",
+            "conversationId",
+            "internetMessageId",
+            "subject",
+            "body",
+            "bodyPreview",
+            "from",
+            "sender",
+            "receivedDateTime",
+            "hasAttachments"
+          ],
+          "filters": {
+            "readStatus": "both"
+          },
+          "options": {
+            "downloadAttachments": true,
+            "attachmentsPrefix": "attachment_"
+          }
+        },
+        "id": "44d3c956-4afd-4ac1-a5bb-c7196ca87767",
+        "name": "Neue Outlook Mail",
+        "type": "n8n-nodes-base.microsoftOutlookTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          120
+        ],
+        "credentials": {
+          "microsoftOutlookOAuth2Api": {
+            "id": "GDh0WTvXD06I3uyw",
+            "name": "Microsoft Outlook account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first();\nconst mail = item.json ?? {};\nconst stripHtml = (value) => String(value ?? '').replace(/<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<script[\\s\\S]*?<\\/script>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/\\s+/g, ' ').trim();\nconst binaryEntries = Object.entries(item.binary ?? {});\nconst pdf = binaryEntries.find(([, file]) => {\n  const mime = String(file?.mimeType ?? '').toLowerCase();\n  const name = String(file?.fileName ?? '').toLowerCase();\n  return mime === 'application/pdf' || name.endsWith('.pdf');\n});\nconst bodyText = stripHtml(mail.body?.content ?? mail.body ?? mail.bodyPreview);\nconst subject = String(mail.subject ?? '').trim();\nconst from = mail.from?.emailAddress ?? mail.sender?.emailAddress ?? mail.from ?? null;\nconst fileName = pdf?.[1]?.fileName ?? null;\nconst classifierSystem = [\n  'Du klassifizierst E-Mails für eine Werkstoffzeugnis-Pipeline.',\n  'Zertifikatsmails enthalten gewöhnlich einen PDF-Anhang; Zusatzinfo-Mails enthalten Bestellung, Positionen, Werkstoff, Norm oder Referenzen.',\n  'Getrennte Mails müssen über dieselbe PO-/Bestell-/Referenznummer korreliert werden.',\n  'Bevorzuge eine PO-Nummer wie PO-26-RFS004402, danach Bestell- oder Auftragsnummern. Verwende conversationId nur als letzte Möglichkeit.',\n  'Antworte ausschließlich als JSON-Objekt.'\n].join(' ');\nconst classifierUser = JSON.stringify({\n  subject,\n  body: bodyText.slice(0, 30000),\n  from,\n  conversationId: mail.conversationId ?? null,\n  hasPdf: Boolean(pdf),\n  pdfFileName: fileName\n});\nreturn [{\n  json: {\n    mailId: mail.id,\n    conversationId: mail.conversationId ?? null,\n    internetMessageId: mail.internetMessageId ?? null,\n    subject,\n    bodyText,\n    from,\n    receivedDateTime: mail.receivedDateTime ?? new Date().toISOString(),\n    hasPdf: Boolean(pdf),\n    pdfFileName: fileName,\n    llmRequest: {\n      model: 'deepseek-v4-flash-3107',\n      temperature: 0,\n      max_tokens: 1800,\n      response_format: { type: 'json_object' },\n      messages: [\n        { role: 'system', content: classifierSystem },\n        { role: 'user', content: [\n          classifierUser,\n          '',\n          'Schema:',\n          JSON.stringify({\n            kind: 'certificate | additional_info | unknown',\n            correlationKey: 'gemeinsame PO-/Referenznummer oder -1',\n            poNumber: 'PO-Nummer oder -1',\n            orderData: { poNumber: 'string oder -1', lines: [{ lineNumber: 'number oder -1', description1: 'string oder null', description2: 'string oder null', properties: [{ propertyCode: 'string', value: 'string' }] }] },\n            confidence: 0.0,\n            notes: ['string']\n          })\n        ].join('\\n') }\n      ]\n    }\n  },\n  binary: pdf ? { data: pdf[1] } : {}\n}];"
+        },
+        "id": "6600842d-e2e9-432a-a03e-c0471dc7db43",
+        "name": "Mail vorbereiten",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": false,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "159d7f44-64c4-40b0-bc87-99521ab714cf",
+                "leftValue": "={{ String($json.from?.address ?? '').trim() }}",
+                "rightValue": "certificates@daimension.de",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "59e10783-b3dd-4c2d-ab8f-531309320737",
+        "name": "Eigene Mail?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          520,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.llmRequest }}",
+          "options": {
+            "timeout": 180000
+          }
+        },
+        "id": "fcf26cfb-31a8-4a5f-b494-f93e049d5ca9",
+        "name": "Mail mit DeepSeek einordnen",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          520,
+          120
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "pAOBlEBSCcHS5Do1",
+            "name": "Daimension LLM Bearer Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const response = $input.first().json;\nconst original = $('Mail vorbereiten').first();\nfunction parseJson(value) {\n  if (value && typeof value === 'object') return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{');\n  const end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  return {};\n}\nconst raw = response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response;\nconst classification = parseJson(raw);\nconst hasPdf = Boolean(original.json.hasPdf);\nlet kind = String(classification.kind ?? 'unknown').toLowerCase();\nif (hasPdf) kind = 'certificate';\nconst po = String(classification.poNumber ?? classification.orderData?.poNumber ?? '').trim();\nconst key = String(classification.correlationKey ?? '').trim();\nconst fallbackKey = original.json.conversationId || original.json.internetMessageId || original.json.mailId;\nconst correlationKey = (key && key !== '-1' ? key : (po && po !== '-1' ? po : fallbackKey)).toUpperCase();\nreturn [{\n  json: {\n    ...original.json,\n    classification: {\n      ...classification,\n      kind,\n      correlationKey,\n      poNumber: po || '-1',\n      orderData: classification.orderData && typeof classification.orderData === 'object' ? classification.orderData : { poNumber: po || '-1', lines: [] }\n    },\n    isCertificate: kind === 'certificate',\n    correlationKey\n  },\n  binary: original.binary ?? {}\n}];"
+        },
+        "id": "34045107-afde-49e5-a2a9-50b26f46cd03",
+        "name": "Einordnung lesen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          780,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "b2203b27-aab2-4125-9849-f67000518976",
+                "leftValue": "={{ $json.isCertificate }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              },
+              {
+                "id": "f4ae166b-b906-4bbd-9f89-7c713b4915e3",
+                "leftValue": "={{ $json.hasPdf }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "98ee27ed-bab6-4604-9a97-7aca51414c9b",
+        "name": "Zertifikatsmail?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1040,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": false,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "1fbde6b1-a17d-4de1-acdd-6fb3ecdf8089",
+                "leftValue": "={{ $json.classification.kind ?? 'unknown' }}",
+                "rightValue": "additional_info",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "b12c669b-7d5a-4693-a10e-93c6dc5e9455",
+        "name": "Zusatzinfo-Mail?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1300,
+          240
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first();\nconst sourceBinary = item.binary?.data;\nif (!sourceBinary) {\n  throw new Error('Der Zertifikatsmail fehlt der PDF-Binäranhang im Feld data.');\n}\nconst pdfBuffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (pdfBuffer.length < 5 || pdfBuffer.subarray(0, 5).toString('ascii') !== '%PDF-') {\n  throw new Error(`Der Outlook-Anhang ist keine gültige PDF-Datei (Bytes: ${pdfBuffer.length}).`);\n}\nconst fileName = sourceBinary.fileName ?? item.json.pdfFileName ?? 'certificate.pdf';\nconst materializedPdf = await this.helpers.prepareBinaryData(pdfBuffer, fileName, 'application/pdf');\nconst key = String(item.json.correlationKey ?? item.json.mailId ?? item.json.receivedDateTime ?? 'certificate').trim().toUpperCase();\nlet hash = 2166136261;\nfor (let index = 0; index < key.length; index++) {\n  hash ^= key.charCodeAt(index);\n  hash = Math.imul(hash, 16777619) >>> 0;\n}\nconst caseNumber = (hash % 2147483646) + 1;\nreturn [{\n  json: {\n    ...item.json,\n    pdfDatasetId: 4037,\n    pdfCaseNumber: caseNumber,\n    pdfDescription: `Werkstoffzeugnis aus Outlook: ${item.json.subject ?? item.json.pdfFileName ?? key}`,\n    pdfAdditionalInformation: JSON.stringify({\n      correlationKey: key,\n      poNumber: item.json.classification?.poNumber ?? '-1',\n      sender: item.json.from ?? null,\n      receivedDateTime: item.json.receivedDateTime ?? null,\n      mailId: item.json.mailId ?? null\n    }),\n    pdfUploadBytes: pdfBuffer.length\n  },\n  binary: { data: materializedPdf }\n}];"
+        },
+        "id": "832f709f-c657-49d8-907e-d1def712ac1d",
+        "name": "PDF-Upload vorbereiten",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1300,
+          -380
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://pdf.daimension.ai/api/v1/documents/pdf",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendBody": true,
+          "contentType": "multipart-form-data",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "parameterType": "formBinaryData",
+                "name": "file",
+                "inputDataFieldName": "data"
+              },
+              {
+                "name": "dataset_id",
+                "value": "={{ $json.pdfDatasetId }}"
+              },
+              {
+                "name": "case_number",
+                "value": "={{ $json.pdfCaseNumber }}"
+              },
+              {
+                "name": "description",
+                "value": "={{ $json.pdfDescription }}"
+              },
+              {
+                "name": "additional_information",
+                "value": "={{ $json.pdfAdditionalInformation }}"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 180000
+          }
+        },
+        "id": "7c471f8e-0d91-4dd4-a3a4-e99270509187",
+        "name": "PDF bei MinerU einreichen",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1560,
+          -380
+        ],
+        "notesInFlow": true,
+        "notes": "Lädt das Zertifikat in Dataset 4037 hoch. Der PDF-Dienst erzeugt asynchron einen MinerU-Extraktionsjob.",
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "pAOBlEBSCcHS5Do1",
+            "name": "Daimension LLM Bearer Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "amount": 15
+        },
+        "id": "b0cbb67d-3cef-4b4e-95b1-14779f5c3053",
+        "name": "Auf MinerU warten",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          1820,
+          -380
+        ],
+        "webhookId": "95da276a-786d-4b93-8133-1d8df8caf4c4"
+      },
+      {
+        "parameters": {
+          "url": "={{ 'https://pdf.daimension.ai/api/v1/documents/' + $('PDF bei MinerU einreichen').first().json.sample_id }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "options": {
+            "timeout": 60000
+          }
+        },
+        "id": "6fd55a5d-3950-4936-bb2e-743700ca34a8",
+        "name": "MinerU-Status prüfen",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2080,
+          -380
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "pAOBlEBSCcHS5Do1",
+            "name": "Daimension LLM Bearer Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": false,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "3f752024-5403-4617-92df-d2b7a4ff8db0",
+                "leftValue": "={{ $json.extraction_status ?? $json.status ?? '' }}",
+                "rightValue": "succeeded",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "a330d95d-aa89-422f-87cc-1866bad93caf",
+        "name": "MinerU fertig?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2340,
+          -380
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": false,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "baf79b40-661c-48fe-97df-b9795c7f619a",
+                "leftValue": "={{ $json.extraction_status ?? $json.status ?? '' }}",
+                "rightValue": "failed",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "f1ead0c3-b27d-4912-8797-d82ece958d13",
+        "name": "MinerU fehlgeschlagen?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2600,
+          -260
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ 'https://pdf.daimension.ai/api/v1/documents/' + $('PDF bei MinerU einreichen').first().json.sample_id + '/result?format=json&include_blocks=false' }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "options": {
+            "timeout": 180000
+          }
+        },
+        "id": "2f51fb11-5358-4408-a9d7-2b0747b1ab55",
+        "name": "PDF mit MinerU lesen",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2600,
+          -500
+        ],
+        "notesInFlow": true,
+        "notes": "Liest nach erfolgreichem asynchronen Job die aggregierte MinerU-Ausgabe als Markdown, Klartext und Seitendaten.",
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "pAOBlEBSCcHS5Do1",
+            "name": "Daimension LLM Bearer Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const status = $input.first().json ?? {};\nconst original = $('Einordnung lesen').first().json;\nconst detail = status.extraction_error ?? status.error ?? status.message ?? 'Unbekannter Fehler';\nreturn [{ json: { replyMailId: original.mailId, replyText: `Die Zertifikatsextraktion mit MinerU ist fehlgeschlagen.\\n\\n${String(detail)}` } }];"
+        },
+        "id": "2bd36d07-86f1-458d-a310-70151c3bbe53",
+        "name": "MinerU-Fehler vorbereiten",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2860,
+          -180
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "reply",
+          "messageId": {
+            "__rl": true,
+            "value": "={{ $json.replyMailId }}",
+            "mode": "id"
+          },
+          "replyToSenderOnly": true,
+          "message": "={{ $json.replyText }}",
+          "additionalFields": {
+            "bodyContentType": "Text"
+          }
+        },
+        "id": "09f4e841-764b-43c3-b479-31956e7562fe",
+        "name": "MinerU-Fehler an Absender",
+        "type": "n8n-nodes-base.microsoftOutlook",
+        "typeVersion": 2,
+        "position": [
+          3120,
+          -180
+        ],
+        "credentials": {
+          "microsoftOutlookOAuth2Api": {
+            "id": "GDh0WTvXD06I3uyw",
+            "name": "Microsoft Outlook account"
+          }
+        },
+        "webhookId": "aa6d979c-cecc-4387-9bef-b53cb3d4812c"
+      },
+      {
+        "parameters": {
+          "jsCode": "const response = $input.first().json;\nconst original = $('Einordnung lesen').first().json;\nfunction firstText(value) {\n  if (typeof value === 'string' && value.trim()) return value.trim();\n  if (Array.isArray(value)) {\n    for (const entry of value) { const found = firstText(entry); if (found) return found; }\n  }\n  if (value && typeof value === 'object') {\n    for (const key of ['markdown','text','extracted_text','extractedText','content','output_text','result','data']) {\n      const found = firstText(value[key]);\n      if (found) return found;\n    }\n    const choice = value.choices?.[0]?.message?.content ?? value.choices?.[0]?.text;\n    if (typeof choice === 'string' && choice.trim()) return choice.trim();\n  }\n  return '';\n}\nconst extracted = firstText(response);\nlet content;\nlet extension;\nlet mimeType;\nlet formatLabel;\nif (extracted) {\n  content = extracted;\n  try {\n    JSON.parse(extracted);\n    extension = 'json';\n    mimeType = 'application/json';\n    formatLabel = 'JSON';\n  } catch {\n    const looksMarkdown = /(^|\\n)#{1,6}\\s|\\|.+\\||(^|\\n)[*-]\\s+/m.test(extracted);\n    extension = looksMarkdown ? 'md' : 'txt';\n    mimeType = looksMarkdown ? 'text/markdown' : 'text/plain';\n    formatLabel = looksMarkdown ? 'Markdown' : 'Text';\n  }\n} else {\n  content = JSON.stringify(response, null, 2);\n  extension = 'json';\n  mimeType = 'application/json';\n  formatLabel = 'JSON';\n}\nconst sourceName = String(original.pdfFileName ?? 'certificate.pdf').replace(/\\.[^.]+$/, '');\nconst safeName = sourceName.replace(/[^A-Za-z0-9._-]+/g, '_') || 'certificate';\nconst previewLimit = 12000;\nconst preview = content.length > previewLimit ? `${content.slice(0, previewLimit)}\\n\\n[Mailvorschau gekürzt – vollständige Ausgabe siehe Anhang.]` : content;\nreturn [{\n  json: {\n    replyMailId: original.mailId,\n    replyText: `Die Zertifikatsextraktion ist abgeschlossen. Ausgabeformat: ${formatLabel}.\\n\\n${preview}`,\n    extractionFormat: formatLabel,\n    extractionFileName: `${safeName}-mineru.${extension}`\n  },\n  binary: {\n    extraction: {\n      data: Buffer.from(content, 'utf8').toString('base64'),\n      mimeType,\n      fileName: `${safeName}-mineru.${extension}`\n    }\n  }\n}];"
+        },
+        "id": "6d025169-3aec-4234-9468-d1f34e503f4a",
+        "name": "MinerU-Ausgabe für Antwort vorbereiten",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1560,
+          -180
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "reply",
+          "messageId": {
+            "__rl": true,
+            "value": "={{ $json.replyMailId }}",
+            "mode": "id"
+          },
+          "replyToSenderOnly": true,
+          "message": "={{ $json.replyText }}",
+          "additionalFields": {
+            "bodyContentType": "Text",
+            "attachments": {
+              "attachments": [
+                {
+                  "binaryPropertyName": "extraction"
+                }
+              ]
+            }
+          },
+          "options": {}
+        },
+        "id": "cfb6cc71-34f0-4620-9433-c7212577f59a",
+        "name": "MinerU-Ausgabe an Absender",
+        "type": "n8n-nodes-base.microsoftOutlook",
+        "typeVersion": 2,
+        "position": [
+          1820,
+          -180
+        ],
+        "credentials": {
+          "microsoftOutlookOAuth2Api": {
+            "id": "GDh0WTvXD06I3uyw",
+            "name": "Microsoft Outlook account"
+          }
+        },
+        "webhookId": "2a498bea-e83c-4bdf-8277-9ba1175fcba1"
+      },
+      {
+        "parameters": {
+          "jsCode": "const response = $input.first().json;\nconst original = $('Einordnung lesen').first().json;\nfunction firstText(value) {\n  if (typeof value === 'string' && value.trim()) return value.trim();\n  if (Array.isArray(value)) { for (const entry of value) { const found = firstText(entry); if (found) return found; } }\n  if (value && typeof value === 'object') {\n    for (const key of ['markdown','text','extracted_text','extractedText','content','output_text','result','data']) { const found = firstText(value[key]); if (found) return found; }\n    const choice = value.choices?.[0]?.message?.content ?? value.choices?.[0]?.text;\n    if (typeof choice === 'string' && choice.trim()) return choice.trim();\n  }\n  return '';\n}\nconst markdown = firstText(response);\nif (!markdown) throw new Error('MinerU/PDF-Konverter lieferte keinen extrahierten Text.');\nconst poMatch = markdown.match(/\\bPO[-_ /]?[A-Z0-9-]{5,}\\b/i) || markdown.match(/(?:customer(?:'s)? order|kunden bestell|bestell(?:ung|nummer)?)[^A-Z0-9]{0,15}([A-Z0-9][A-Z0-9/_-]{5,})/i);\nconst documentKey = poMatch ? String(poMatch[1] ?? poMatch[0]).replace(/[_ ]/g, '-').toUpperCase() : original.correlationKey;\nconst state = $getWorkflowStaticData('global');\nstate.pendingCertificatePairs ??= {};\nconst now = Date.now();\nfor (const [key, value] of Object.entries(state.pendingCertificatePairs)) {\n  if (now - Number(value.updatedAt ?? 0) > 30 * 86400000) delete state.pendingCertificatePairs[key];\n}\nconst existing = state.pendingCertificatePairs[documentKey] ?? state.pendingCertificatePairs[original.correlationKey] ?? {};\nstate.pendingCertificatePairs[documentKey] = {\n  ...existing,\n  certificate: {\n    markdown,\n    mailId: original.mailId,\n    subject: original.subject,\n    fileName: original.pdfFileName,\n    receivedDateTime: original.receivedDateTime,\n    mineruModel: 'opendatalab/MinerU2.5-Pro-2605-1.2B',\n    mineruEndpoint: 'https://pdf.daimension.ai/api/v1/documents',\n    mineruSampleId: $('PDF bei MinerU einreichen').first().json.sample_id\n  },\n  updatedAt: now\n};\nif (documentKey !== original.correlationKey && state.pendingCertificatePairs[original.correlationKey]) delete state.pendingCertificatePairs[original.correlationKey];\nconst pair = state.pendingCertificatePairs[documentKey];\nreturn [{ json: { correlationKey: documentKey, replyMailId: original.mailId, pair } }];"
+        },
+        "id": "0b46f669-df1e-45d4-86fb-74263e478bc9",
+        "name": "Zertifikat zwischenspeichern",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1560,
+          20
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const input = $input.first().json;\nconst classification = input.classification ?? {};\nconst state = $getWorkflowStaticData('global');\nstate.pendingCertificatePairs ??= {};\nconst now = Date.now();\nfor (const [key, value] of Object.entries(state.pendingCertificatePairs)) {\n  if (now - Number(value.updatedAt ?? 0) > 30 * 86400000) delete state.pendingCertificatePairs[key];\n}\nconst key = input.correlationKey;\nconst existing = state.pendingCertificatePairs[key] ?? {};\nstate.pendingCertificatePairs[key] = {\n  ...existing,\n  additionalInfo: {\n    orderData: classification.orderData ?? { poNumber: classification.poNumber ?? '-1', lines: [] },\n    rawMailText: input.bodyText,\n    mailId: input.mailId,\n    subject: input.subject,\n    receivedDateTime: input.receivedDateTime,\n    classifierConfidence: classification.confidence ?? null,\n    classifierNotes: classification.notes ?? []\n  },\n  updatedAt: now\n};\nconst pair = state.pendingCertificatePairs[key];\nconst ready = Boolean(pair.certificate && pair.additionalInfo);\nreturn [{ json: { ready, correlationKey: key, replyMailId: input.mailId, pair: ready ? pair : null, pendingMessage: `Zusatz-/Bestelldaten für ${key} wurden gespeichert. Die Analyse läuft unabhängig davon, sobald die Zertifikatsmail mit dem PDF-Anhang verarbeitet ist.` } }];"
+        },
+        "id": "197ae6ec-20df-41c3-81a5-f7915ad141ee",
+        "name": "Zusatzinfo zwischenspeichern",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1300,
+          240
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "reply",
+          "messageId": {
+            "__rl": true,
+            "value": "={{ $json.replyMailId }}",
+            "mode": "id"
+          },
+          "replyToSenderOnly": true,
+          "message": "={{ $json.pendingMessage }}",
+          "additionalFields": {
+            "bodyContentType": "Text"
+          },
+          "options": {}
+        },
+        "id": "9ec952c1-2bc0-4c9c-bc59-7aa2daf8e6fb",
+        "name": "Bestätigung per Outlook",
+        "type": "n8n-nodes-base.microsoftOutlook",
+        "typeVersion": 2,
+        "position": [
+          2080,
+          280
+        ],
+        "credentials": {
+          "microsoftOutlookOAuth2Api": {
+            "id": "GDh0WTvXD06I3uyw",
+            "name": "Microsoft Outlook account"
+          }
+        },
+        "webhookId": "c7088a82-9b1a-4eb1-b44d-de056fbb927e"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const input = $input.first().json;\nconst pair = input.pair;\nconst text = String(pair?.certificate?.markdown ?? '').replace(/\\r\\n?/g, '\\n').trim();\nif (!text) throw new Error('Im vollständigen Mail-Paar fehlt der Zertifikatstext.');\nconst maxChars = 12000;\nconst sections = text.split(/\\n-{3,}\\n+|\\n(?=##?\\s+(?:Seite|Page)\\b)/i).map(s => s.trim()).filter(Boolean);\nconst chunks = [];\nlet current = '';\nfor (const section of sections.length ? sections : [text]) {\n  if (section.length > maxChars) {\n    if (current) { chunks.push(current); current = ''; }\n    for (let offset = 0; offset < section.length; offset += maxChars) chunks.push(section.slice(offset, offset + maxChars));\n    continue;\n  }\n  const joined = current ? `${current}\\n\\n---\\n\\n${section}` : section;\n  if (joined.length > maxChars && current) { chunks.push(current); current = section; } else current = joined;\n}\nif (current) chunks.push(current);\nconst orderData = pair.additionalInfo?.orderData ?? {};\nconst rawMailText = pair.additionalInfo?.rawMailText ?? '';\nconst system = `Du bist ein spezialisierter Extraktor für Werkstoffzeugnisse. Erzeuge eine belegorientierte Zwischenrepräsentation, noch nicht das finale Kundenschema. Verwende ausschließlich den Zeugnistext als Quelle für Zeugniswerte; Bestelldaten sind nur Vergleichsdaten. Unterscheide Schmelzenanalyse (H/Heat) strikt von Produktanalyse (P/Product). Beachte Skalen X 100, X 1000 und X 10000; gib rawValue, scale und value aus. Ordne Chemie, Mengen und Zugversuche einer Schmelze zu. Bei Rohren ist die Menge die schmelzenspezifische Länge in Metern. Für Zugversuche bevorzuge +20 °C; bei Dehnung verwende Obtained, niemals Min. Kreditor ist Herstellerwerk, nicht Kunde. Erfasse OCR-Artefakte, Konflikte und Unsicherheiten. Antworte nur als JSON-Objekt mit certificate, heats, orderComparison, ocrArtifacts und uncertainties.`;\nreturn chunks.map((chunk, index) => ({ json: {\n  correlationKey: input.correlationKey,\n  replyMailId: input.replyMailId,\n  pair,\n  chunkIndex: index + 1,\n  chunkCount: chunks.length,\n  llmRequest: {\n    model: 'deepseek-v4-flash-3107', temperature: 0, max_tokens: 5000, response_format: { type: 'json_object' },\n    messages: [\n      { role: 'system', content: system },\n      { role: 'user', content: `<BLOCK index=\\\"${index + 1}\\\" total=\\\"${chunks.length}\\\">\\n<BESTELLDATEN>${JSON.stringify(orderData)}\\n${rawMailText}</BESTELLDATEN>\\n<ZEUGNISTEXT>${chunk}</ZEUGNISTEXT>\\n</BLOCK>` }\n    ]\n  }\n} }));"
+        },
+        "id": "32bcd57a-50cf-4458-a87a-d82b0f98642c",
+        "name": "Zeugnis in Belegblöcke teilen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2080,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.llmRequest }}",
+          "options": {
+            "timeout": 300000
+          }
+        },
+        "id": "7dd58bf3-ff7d-47e3-947c-d6e797290d8a",
+        "name": "Belege mit DeepSeek extrahieren",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2340,
+          80
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "pAOBlEBSCcHS5Do1",
+            "name": "Daimension LLM Bearer Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object' && !Array.isArray(value)) return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Belegantwort enthält kein valides JSON.');\n}\nconst responses = $input.all();\nconst sources = $('Zeugnis in Belegblöcke teilen').all();\nconst chunks = responses.map(item => parseJson(item.json.choices?.[0]?.message?.content ?? item.json.output_text ?? item.json.text ?? item.json));\nconst source = sources[0].json;\nconst orderData = source.pair.additionalInfo?.orderData ?? {};\nconst evidence = { chunks };\nconst schema = {\n  results: [{\n    heatNumber: 'string', chemicals: { C: 'number', SI: 'number', S: 'number', P: 'number', SN: 'number', MN: 'number', CR: 'number', NI: 'number', MO: 'number', TI: 'number', CO: 'number', CU: 'number', N: 'number', AL: 'number', V: 'number', NB: 'number', B: 'number', Zr: 'number', W: 'number', Sb: 'number', As: 'number', 'AL/N': 'number', 'Nb+(V2,5)': 'number', 'Nb+V+Ti': 'number', 'Mn/C': 'number', CEV: 'number', 'V+NB': 'number', 'Ni+Cu': 'number', 'Cu+Ni+Cr+Mo+V': 'number', 'Cr+Cu+Mo+Ni': 'number', 'Cu+Mo': 'number' },\n    yieldStrength02: 'number', yieldStrength10: 'number', tensileStrength: 'number', elongation: 'number', certificateNumber: 'string', quantity: 'number', creditor: 'string', product: 'string', humanRequired: 'boolean', customerOrderNumber: 'string', dimensions: 'OD x wall mm', werkstoff1: 'string', werkstoff2: 'string', werkstoff3: 'string', werkstoff4: 'string', werkstoff5: 'string', norm1: 'string', norm2: 'string', norm3: 'string', norm4: 'string', norm5: 'string'\n  }]\n};\nconst system = `Normalisiere belegorientierte Werkstoffzeugnisdaten in das vorgegebene MaterialAnalysis-Schema. Erzeuge genau ein Objekt pro Schmelze und schmelzenspezifischer Menge. Verwende nur H-/Heat-Chemie und deren bereits normalisierten value. Gib alle Chemieschlüssel aus; fehlende Zahlen -1. Bei Rohren ist quantity die schmelzenspezifische Länge in Metern. Mechanische Werte stammen bevorzugt aus Raumtemperaturmessungen; bei mehreren verwende pro Feld den kleinsten Wert. elongation ist Obtained, niemals Min. yieldStrength10 nur bei ausdrücklich 1,0 %. Kreditor ist ein einzelner Hersteller-String. Zeugniswerte niemals mit Bestelldaten auffüllen. Konflikte, OCR-Probleme und Unsicherheiten setzen humanRequired=true. dimensions ist Außendurchmesser x Wanddicke mm. Leere Werkstoff-/Normslots sind '-1'. Antworte nur als JSON-Objekt {\\\"results\\\":[...]}.`;\nreturn [{ json: { correlationKey: source.correlationKey, replyMailId: source.replyMailId, pair: source.pair, evidence, orderData, schema, llmRequest: { model: 'deepseek-v4-flash-3107', temperature: 0, max_tokens: 7000, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: `<ZIELSCHEMA>${JSON.stringify(schema)}</ZIELSCHEMA>\\n<BESTELLDATEN>${JSON.stringify(orderData)}</BESTELLDATEN>\\n<EXTRAHIERTE_BELEGE>${JSON.stringify(evidence)}</EXTRAHIERTE_BELEGE>` }] } } }];"
+        },
+        "id": "3d84f1ce-e403-4276-9be4-ab563131a66f",
+        "name": "Belege sammeln und Normalisierung bauen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2600,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.llmRequest }}",
+          "options": {
+            "timeout": 300000
+          }
+        },
+        "id": "f491dcd3-00e4-478a-9947-8d7b79df76a3",
+        "name": "Mit DeepSeek normalisieren",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2860,
+          80
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "pAOBlEBSCcHS5Do1",
+            "name": "Daimension LLM Bearer Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object' && !Array.isArray(value)) return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Normalisierung enthält kein valides JSON.');\n}\nconst response = $input.first().json;\nconst context = $('Belege sammeln und Normalisierung bauen').first().json;\nconst candidate = parseJson(response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response);\nconst system = `Du bist die abschließende Qualitätskontrolle für strukturierte Werkstoffzeugnisdaten. Prüfe den Kandidaten ausschließlich gegen Belege und Bestelldaten. Keine P-/Product-Analyse als Chemie; Skalen nicht erneut anwenden; Schmelzen und Mengen korrekt zuordnen; bei Rohren Meter; Dehnung Obtained statt Min.; Bestelldaten nie in Zeugnisfelder kopieren; Abweichungen/OCR/Mehrdeutigkeit setzen humanRequired=true; genau ein Herstellerkreditor; alle Pflicht- und Chemiefelder; fehlende Zahlen -1, Strings '-1'; keine Zusatzfelder. Korrigiere Fehler und antworte nur als JSON-Objekt {\\\"results\\\":[...]}.`;\nreturn [{ json: { ...context, candidate, llmRequest: { model: 'deepseek-v4-flash-3107', temperature: 0, max_tokens: 7000, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: `<ZIELSCHEMA>${JSON.stringify(context.schema)}</ZIELSCHEMA>\\n<BESTELLDATEN>${JSON.stringify(context.orderData)}</BESTELLDATEN>\\n<EXTRAHIERTE_BELEGE>${JSON.stringify(context.evidence)}</EXTRAHIERTE_BELEGE>\\n<KANDIDAT>${JSON.stringify(candidate)}</KANDIDAT>` }] } } }];"
+        },
+        "id": "e5e62bab-d960-4a17-9942-2c049ae28b3d",
+        "name": "Qualitätsprüfung vorbereiten",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3120,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.llmRequest }}",
+          "options": {
+            "timeout": 300000
+          }
+        },
+        "id": "014c0dd5-b5fe-45e7-8c1f-0ad3b069e61b",
+        "name": "Mit DeepSeek prüfen",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3380,
+          80
+        ],
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "pAOBlEBSCcHS5Do1",
+            "name": "Daimension LLM Bearer Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "function parseJson(value) {\n  if (value && typeof value === 'object') return value;\n  const text = String(value ?? '').trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\n  try { return JSON.parse(text); } catch {}\n  const start = text.indexOf('{'), end = text.lastIndexOf('}');\n  if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));\n  throw new Error('DeepSeek-Prüfung enthält kein valides JSON.');\n}\nconst response = $input.first().json;\nconst context = $('Qualitätsprüfung vorbereiten').first().json;\nconst envelope = parseJson(response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response);\nconst rows = Array.isArray(envelope) ? envelope : (Array.isArray(envelope.results) ? envelope.results : []);\nif (!rows.length) throw new Error('Die geprüfte Antwort enthält keine Ergebniszeilen.');\nconst chemicalKeys = ['C','SI','S','P','SN','MN','CR','NI','MO','TI','CO','CU','N','AL','V','NB','B','Zr','W','Sb','As','AL/N','Nb+(V2,5)','Nb+V+Ti','Mn/C','CEV','V+NB','Ni+Cu','Cu+Ni+Cr+Mo+V','Cr+Cu+Mo+Ni','Cu+Mo'];\nconst toNumber = (value) => { const n = typeof value === 'number' ? value : Number(String(value ?? '').trim().replace(',', '.').replace(/^[<>≈~]\\s*/, '').replace(/\\s*(?:MPa|%|m|pcs?)$/i, '')); return Number.isFinite(n) && n >= -1 ? n : -1; };\nconst toString = (value) => { const text = String(value ?? '').trim(); return text && text.toLowerCase() !== 'null' ? text : '-1'; };\nconst normalized = rows.map((row) => {\n  const chemicals = {};\n  for (const key of chemicalKeys) { const aliases = [key, key.toUpperCase()]; let value = -1; for (const alias of aliases) if (row.chemicals && Object.prototype.hasOwnProperty.call(row.chemicals, alias)) value = toNumber(row.chemicals[alias]); chemicals[key] = value; }\n  const dimensionsRaw = toString(row.dimensions);\n  const dm = dimensionsRaw.match(/(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:mm[^0-9]*)?(?:x|×|\\/)\\s*(\\d{1,4}(?:[.,]\\d+)?)/i);\n  const dimensions = dimensionsRaw === '-1' ? '-1' : (dm ? `${dm[1].replace(',', '.')} x ${dm[2].replace(',', '.')} mm` : '-1');\n  let humanRequired = row.humanRequired === true || (dimensions === '-1' && dimensionsRaw !== '-1');\n  const po = toString(row.customerOrderNumber);\n  const expectedPo = toString(context.orderData?.poNumber);\n  if (expectedPo !== '-1' && po.toUpperCase() !== expectedPo.toUpperCase()) humanRequired = true;\n  return {\n    heatNumber: toString(row.heatNumber), chemicals, yieldStrength02: toNumber(row.yieldStrength02), yieldStrength10: toNumber(row.yieldStrength10), tensileStrength: toNumber(row.tensileStrength), elongation: toNumber(row.elongation), certificateNumber: toString(row.certificateNumber), quantity: Math.round(toNumber(row.quantity) * 100) / 100, creditor: toString(row.creditor), product: toString(row.product), humanRequired, customerOrderNumber: po, dimensions, werkstoff1: toString(row.werkstoff1), werkstoff2: toString(row.werkstoff2), werkstoff3: toString(row.werkstoff3), werkstoff4: toString(row.werkstoff4), werkstoff5: toString(row.werkstoff5), norm1: toString(row.norm1), norm2: toString(row.norm2), norm3: toString(row.norm3), norm4: toString(row.norm4), norm5: toString(row.norm5)\n  };\n});\nconst result = { correlationKey: context.correlationKey, generatedAt: new Date().toISOString(), mineru: { endpoint: context.pair.certificate.mineruEndpoint, model: context.pair.certificate.mineruModel }, llm: { endpoint: 'https://llm-inference.daimension.ai/v1/chat/completions', model: 'deepseek-v4-flash-3107' }, sourceMails: { certificate: { id: context.pair.certificate.mailId, subject: context.pair.certificate.subject, fileName: context.pair.certificate.fileName }, additionalInfo: context.pair.additionalInfo ? { id: context.pair.additionalInfo.mailId, subject: context.pair.additionalInfo.subject } : null }, results: normalized };\nconst state = $getWorkflowStaticData('global');\nif (state.pendingCertificatePairs) delete state.pendingCertificatePairs[context.correlationKey];\nconst jsonText = JSON.stringify(result, null, 2);\nconst safeName = String(context.correlationKey).replace(/[^A-Za-z0-9._-]+/g, '_');\nreturn [{ json: { ...result, replyMailId: context.replyMailId, replyText: `Die Zertifikatsanalyse für ${context.correlationKey} ist abgeschlossen. ${normalized.length} Schmelzen-/Mengenzeile(n) wurden extrahiert. Datensätze mit humanRequired=true müssen manuell geprüft werden. Das vollständige JSON ist angehängt.` }, binary: { result: { data: Buffer.from(jsonText).toString('base64'), mimeType: 'application/json', fileName: `certificate-analysis-${safeName}.json` } } }];"
+        },
+        "id": "c91a7110-cdba-4c01-8b7e-87eab393a27c",
+        "name": "Ergebnis validieren und JSON bauen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3640,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "reply",
+          "messageId": {
+            "__rl": true,
+            "value": "={{ $json.replyMailId }}",
+            "mode": "id"
+          },
+          "replyToSenderOnly": true,
+          "message": "={{ $json.replyText }}",
+          "additionalFields": {
+            "bodyContentType": "Text",
+            "attachments": {
+              "attachments": [
+                {
+                  "binaryPropertyName": "result"
+                }
+              ]
+            }
+          },
+          "options": {}
+        },
+        "id": "50c1aacd-b7c6-4336-b01c-354d1ef46ad1",
+        "name": "Ergebnis per Outlook senden",
+        "type": "n8n-nodes-base.microsoftOutlook",
+        "typeVersion": 2,
+        "position": [
+          3900,
+          80
+        ],
+        "credentials": {
+          "microsoftOutlookOAuth2Api": {
+            "id": "GDh0WTvXD06I3uyw",
+            "name": "Microsoft Outlook account"
+          }
+        },
+        "webhookId": "912aabd2-94be-47b3-b5e1-0ae37a773c43"
+      }
+    ],
+    "connections": {
+      "Neue Outlook Mail": {
+        "main": [
+          [
+            {
+              "node": "Mail vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mail vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "Eigene Mail?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Eigene Mail?": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Mail mit DeepSeek einordnen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mail mit DeepSeek einordnen": {
+        "main": [
+          [
+            {
+              "node": "Einordnung lesen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Einordnung lesen": {
+        "main": [
+          [
+            {
+              "node": "Zertifikatsmail?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Zertifikatsmail?": {
+        "main": [
+          [
+            {
+              "node": "PDF-Upload vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Zusatzinfo-Mail?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Zusatzinfo-Mail?": {
+        "main": [
+          [
+            {
+              "node": "Zusatzinfo zwischenspeichern",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "PDF-Upload vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "PDF bei MinerU einreichen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PDF bei MinerU einreichen": {
+        "main": [
+          [
+            {
+              "node": "Auf MinerU warten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Auf MinerU warten": {
+        "main": [
+          [
+            {
+              "node": "MinerU-Status prüfen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MinerU-Status prüfen": {
+        "main": [
+          [
+            {
+              "node": "MinerU fertig?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MinerU fertig?": {
+        "main": [
+          [
+            {
+              "node": "PDF mit MinerU lesen",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "MinerU fehlgeschlagen?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MinerU fehlgeschlagen?": {
+        "main": [
+          [
+            {
+              "node": "MinerU-Fehler vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Auf MinerU warten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MinerU-Fehler vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "MinerU-Fehler an Absender",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MinerU-Fehler an Absender": {
+        "main": [
+          []
+        ]
+      },
+      "PDF mit MinerU lesen": {
+        "main": [
+          [
+            {
+              "node": "Zertifikat zwischenspeichern",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "MinerU-Ausgabe für Antwort vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MinerU-Ausgabe für Antwort vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "MinerU-Ausgabe an Absender",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MinerU-Ausgabe an Absender": {
+        "main": [
+          []
+        ]
+      },
+      "Zertifikat zwischenspeichern": {
+        "main": [
+          [
+            {
+              "node": "Zeugnis in Belegblöcke teilen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Zusatzinfo zwischenspeichern": {
+        "main": [
+          [
+            {
+              "node": "Bestätigung per Outlook",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Zeugnis in Belegblöcke teilen": {
+        "main": [
+          [
+            {
+              "node": "Belege mit DeepSeek extrahieren",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Belege mit DeepSeek extrahieren": {
+        "main": [
+          [
+            {
+              "node": "Belege sammeln und Normalisierung bauen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Belege sammeln und Normalisierung bauen": {
+        "main": [
+          [
+            {
+              "node": "Mit DeepSeek normalisieren",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mit DeepSeek normalisieren": {
+        "main": [
+          [
+            {
+              "node": "Qualitätsprüfung vorbereiten",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Qualitätsprüfung vorbereiten": {
+        "main": [
+          [
+            {
+              "node": "Mit DeepSeek prüfen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mit DeepSeek prüfen": {
+        "main": [
+          [
+            {
+              "node": "Ergebnis validieren und JSON bauen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ergebnis validieren und JSON bauen": {
+        "main": [
+          [
+            {
+              "node": "Ergebnis per Outlook senden",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Bestätigung per Outlook": {
+        "main": [
+          []
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Maik Daniel Klause",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-08-06T08:44:31.059Z",
+        "id": 24,
+        "workflowId": "oLtOyTcKU11RrNJC",
+        "versionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
+        "event": "deactivated",
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      },
+      {
+        "createdAt": "2026-08-06T08:44:33.475Z",
+        "id": 25,
+        "workflowId": "oLtOyTcKU11RrNJC",
+        "versionId": "3417ec3c-74b6-4ceb-b1b1-81aa1befe9cf",
+        "event": "activated",
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      }
+    ]
+  }
+}

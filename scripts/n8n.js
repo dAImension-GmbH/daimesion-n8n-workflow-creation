@@ -318,7 +318,9 @@ function findExistingWorkflowId(workflows, name) {
 }
 
 function toApiPayload(workflow) {
-  const allowed = ["name", "nodes", "connections", "settings", "staticData", "tags"];
+  // Tags are read-only in newer n8n public API versions and must be managed
+  // through the dedicated tags endpoints instead of workflow create/update.
+  const allowed = ["name", "nodes", "connections", "settings", "staticData"];
   const payload = {};
 
   for (const key of allowed) {

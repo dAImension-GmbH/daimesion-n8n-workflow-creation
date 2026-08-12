@@ -58,6 +58,33 @@ Deploy the Google News daily summary workflow:
 node scripts/n8n.js deploy workflows/google-news-daily-summary.json
 ```
 
+Deploy the Outlook certificate analysis workflow:
+
+```sh
+node scripts/n8n.js sync workflows/outlook-certificate-analysis.json
+```
+
+The certificate workflow analyzes each Outlook message independently. PDF
+attachments are uploaded to dataset `4037` through
+`https://pdf.daimension.ai/api/v1/documents/pdf`. A stable numeric case number
+is derived from the mail correlation key. The workflow polls the asynchronous
+MinerU job and retrieves its Markdown, plain text, and page results. As soon as
+a certificate's PDF-to-text extraction succeeds, the extracted text passes
+through evidence extraction, schema normalization, and final review with
+`deepseek-v4-flash-3107` at dAImension.ai. Immediately after successful PDF
+extraction, the certificate sender receives the detected text, Markdown, or
+JSON in the reply body and as a complete attachment; the final structured JSON
+is sent in a separate Outlook reply. There is no pairing with a counterpart
+mail: separately arriving additional-order-data (Zusatzinfo) emails are stored
+and confirmed to the sender, but they never delay or gate the certificate
+analysis.
+
+Before activation, configure the Microsoft Outlook OAuth2 credential on the
+trigger and all reply nodes. Also verify the token stored in the n8n Bearer
+credential `Daimension LLM Bearer Auth`. If its HTTP Request domains are
+restricted, allow both hostnames `llm-inference.daimension.ai` and
+`pdf.daimension.ai` without URL schemes or paths.
+
 The Google News workflow reads the German Google News RSS feed, keeps today's
 items in the `Europe/Berlin` timezone, and sends a summary prompt to the
 OpenAI-compatible Daimension endpoint
