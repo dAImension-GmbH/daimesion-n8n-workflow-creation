@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-12T11:26:46.624Z",
+  "updatedAt": "2026-08-13T11:56:30.623Z",
   "createdAt": "2026-08-05T13:45:59.513Z",
   "id": "oLtOyTcKU11RrNJC",
   "name": "Outlook Certificate Analysis (MinerU + DeepSeek)",
@@ -810,8 +810,8 @@
       ],
       "credentials": {
         "httpBearerAuth": {
-          "id": "2GhCkGbqxuSjxHPm",
-          "name": "Buhlmann Document Review Bearer Auth v2"
+          "id": "QpAj9wWi2iO3bFXu",
+          "name": "Buhlmann Document Review Bearer Auth v3"
         }
       }
     },
@@ -899,8 +899,8 @@
       ],
       "credentials": {
         "httpBearerAuth": {
-          "id": "2GhCkGbqxuSjxHPm",
-          "name": "Buhlmann Document Review Bearer Auth v2"
+          "id": "QpAj9wWi2iO3bFXu",
+          "name": "Buhlmann Document Review Bearer Auth v3"
         }
       }
     },
@@ -933,8 +933,8 @@
       ],
       "credentials": {
         "httpBearerAuth": {
-          "id": "2GhCkGbqxuSjxHPm",
-          "name": "Buhlmann Document Review Bearer Auth v2"
+          "id": "QpAj9wWi2iO3bFXu",
+          "name": "Buhlmann Document Review Bearer Auth v3"
         }
       }
     },
@@ -1421,7 +1421,7 @@
   },
   "staticData": {
     "node:Neue Outlook Mail": {
-      "lastTimeChecked": "2026-08-12T13:26:49.960+02:00"
+      "lastTimeChecked": "2026-08-13T13:56:33.776+02:00"
     }
   },
   "meta": {
@@ -1429,9 +1429,9 @@
   },
   "nodeGroups": [],
   "pinData": {},
-  "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
-  "activeVersionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
-  "versionCounter": 27,
+  "versionId": "9d3c6c4e-e138-4b16-824d-afa64e03af5c",
+  "activeVersionId": "9d3c6c4e-e138-4b16-824d-afa64e03af5c",
+  "versionCounter": 31,
   "triggerCount": 1,
   "sourceWorkflowId": null,
   "shared": [
@@ -1456,9 +1456,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-08-12T11:26:46.627Z",
-    "createdAt": "2026-08-12T11:26:46.627Z",
-    "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
+    "updatedAt": "2026-08-13T11:56:30.626Z",
+    "createdAt": "2026-08-13T11:56:30.626Z",
+    "versionId": "9d3c6c4e-e138-4b16-824d-afa64e03af5c",
     "workflowId": "oLtOyTcKU11RrNJC",
     "nodes": [
       {
@@ -2264,8 +2264,8 @@
         ],
         "credentials": {
           "httpBearerAuth": {
-          "id": "2GhCkGbqxuSjxHPm",
-          "name": "Buhlmann Document Review Bearer Auth v2"
+            "id": "QpAj9wWi2iO3bFXu",
+            "name": "Buhlmann Document Review Bearer Auth v3"
           }
         }
       },
@@ -2353,8 +2353,8 @@
         ],
         "credentials": {
           "httpBearerAuth": {
-          "id": "2GhCkGbqxuSjxHPm",
-          "name": "Buhlmann Document Review Bearer Auth v2"
+            "id": "QpAj9wWi2iO3bFXu",
+            "name": "Buhlmann Document Review Bearer Auth v3"
           }
         }
       },
@@ -2387,8 +2387,8 @@
         ],
         "credentials": {
           "httpBearerAuth": {
-          "id": "2GhCkGbqxuSjxHPm",
-          "name": "Buhlmann Document Review Bearer Auth v2"
+            "id": "QpAj9wWi2iO3bFXu",
+            "name": "Buhlmann Document Review Bearer Auth v3"
           }
         }
       },
@@ -2872,34 +2872,34 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-08-12T11:26:46.721Z",
-        "id": 30,
+        "createdAt": "2026-08-13T11:56:30.699Z",
+        "id": 38,
         "workflowId": "oLtOyTcKU11RrNJC",
-        "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
+        "versionId": "9d3c6c4e-e138-4b16-824d-afa64e03af5c",
         "event": "deactivated",
         "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
       },
       {
-        "createdAt": "2026-08-12T11:26:49.838Z",
-        "id": 31,
+        "createdAt": "2026-08-13T11:56:33.637Z",
+        "id": 39,
         "workflowId": "oLtOyTcKU11RrNJC",
-        "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
+        "versionId": "9d3c6c4e-e138-4b16-824d-afa64e03af5c",
         "event": "activated",
         "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
       },
       {
-        "createdAt": "2026-08-12T11:26:49.937Z",
-        "id": 32,
+        "createdAt": "2026-08-13T11:56:33.757Z",
+        "id": 40,
         "workflowId": "oLtOyTcKU11RrNJC",
-        "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
+        "versionId": "9d3c6c4e-e138-4b16-824d-afa64e03af5c",
         "event": "deactivated",
         "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
       },
       {
-        "createdAt": "2026-08-12T11:26:50.174Z",
-        "id": 33,
+        "createdAt": "2026-08-13T11:56:33.972Z",
+        "id": 41,
         "workflowId": "oLtOyTcKU11RrNJC",
-        "versionId": "53b2e322-006d-4bd6-999a-515f98d2e56b",
+        "versionId": "9d3c6c4e-e138-4b16-824d-afa64e03af5c",
         "event": "activated",
         "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
       }
