@@ -86,6 +86,17 @@ mail: separately arriving additional-order-data (Zusatzinfo) emails are stored
 and confirmed to the sender, but they never delay or gate the certificate
 analysis.
 
+Run the local certificate regression against a source PDF without uploading it
+to an external service:
+
+```sh
+npm run test:certificate -- "/absolute/path/to/certificate.pdf"
+```
+
+The regression checks the source values, compiles every n8n Code node, executes
+the evidence-block and critical-source selection, and verifies final chemical
+symbol and dimension normalization.
+
 Before activation, configure the Microsoft Outlook OAuth2 credential on the
 trigger and all reply nodes. Also verify the token stored in the n8n Bearer
 credential `Daimension LLM Bearer Auth`. If its HTTP Request domains are
