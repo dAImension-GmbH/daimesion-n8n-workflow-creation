@@ -84,7 +84,10 @@ JSON in the reply body and as a complete attachment; the final structured JSON
 is sent in a separate Outlook reply. There is no pairing with a counterpart
 mail: separately arriving additional-order-data (Zusatzinfo) emails are stored
 and confirmed to the sender, but they never delay or gate the certificate
-analysis.
+analysis. Composite certificates are resolved position by position: values from
+the issuing cover certificate are combined with heat-specific chemistry and
+mechanics from attached raw-material certificates. A heat number may therefore
+appear in multiple result rows when it belongs to multiple pipe positions.
 
 Run the local certificate regression against a source PDF without uploading it
 to an external service:
@@ -94,8 +97,9 @@ npm run test:certificate -- "/absolute/path/to/certificate.pdf"
 ```
 
 The regression checks the source values, compiles every n8n Code node, executes
-the evidence-block and critical-source selection, and verifies final chemical
-symbol and dimension normalization.
+the evidence-block and critical-source selection, repairs common malformed LLM
+JSON responses, and verifies position-preserving chemical and dimension
+normalization.
 
 Before activation, configure the Microsoft Outlook OAuth2 credential on the
 trigger and all reply nodes. Also verify the token stored in the n8n Bearer
