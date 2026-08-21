@@ -41,11 +41,47 @@ async function main() {
     case "pull":
       await pull(args[0] ?? "workflows/exported");
       break;
+    case "workflow":
+      await printWorkflow(args[0]);
+      break;
+    case "pull-workflow":
+      await pullWorkflow(args[0], args[1]);
+      break;
+    case "data-table-rows":
+      await listDataTableRows(args[0], args[1], args.includes("--raw"));
+      break;
     case "activate":
       await setActive(args[0], true);
       break;
     case "deactivate":
       await setActive(args[0], false);
+      break;
+    case "publish":
+      await publishWorkflow(args[0]);
+      break;
+    case "executions":
+      await listExecutions(args[0], args[1]);
+      break;
+    case "execution-summary":
+      await executionSummary(args[0]);
+      break;
+    case "test-runs":
+      await listTestRuns(args[0], args[1]);
+      break;
+    case "start-test-run":
+      await startTestRun(args[0]);
+      break;
+    case "cancel-test-run":
+      await cancelTestRun(args[0], args[1]);
+      break;
+    case "test-run-summary":
+      await testRunSummary(args[0], args[1]);
+      break;
+    case "watch-test-run":
+      await watchTestRun(args[0], args[1], args[2]);
+      break;
+    case "test-cases":
+      await listTestCases(args[0], args[1], args[2], args.includes("--raw"));
       break;
     default:
       printUsage();
@@ -160,6 +196,7 @@ async function sync(args) {
 
 async function pushWorkflows(args, options) {
   const activateAfterDeploy = args.includes("--activate");
+  const publishAfterDeploy = args.includes("--publish");
   const target = args.find((arg) => !arg.startsWith("--")) ?? "workflows";
   const files = await workflowFiles(target);
   const existing = await getAllWorkflows();
@@ -190,6 +227,10 @@ async function pushWorkflows(args, options) {
       await api(`/workflows/${encodeURIComponent(saved.id)}/activate`, { method: "POST" });
     }
 
+    if (publishAfterDeploy) {
+      await api(`/workflows/${encodeURIComponent(saved.id)}/publish`, { method: "POST" });
+    }
+
     if (options.writeBack) {
       const fullWorkflow = await api(`/workflows/${encodeURIComponent(saved.id)}`);
       await writeFile(file, `${JSON.stringify(fullWorkflow, null, 2)}\n`);
@@ -215,6 +256,55 @@ async function pull(targetDir) {
   }
 }
 
+async function printWorkflow(id) {
+  if (!id) {
+    throw new Error("Missing workflow id. Usage: node scripts/n8n.js workflow WORKFLOW_ID");
+  }
+
+  const workflow = await api(`/workflows/${encodeURIComponent(id)}`);
+  console.log(JSON.stringify(workflow, null, 2));
+}
+
+async function pullWorkflow(id, targetFile) {
+  if (!id) {
+    throw new Error("Usage: node scripts/n8n.js pull-workflow WORKFLOW_ID [TARGET_FILE]");
+  }
+
+  const workflow = await api(`/workflows/${encodeURIComponent(id)}`);
+  const resolved = path.resolve(
+    ROOT,
+    targetFile ?? path.join("workflows", `${slugify(workflow.name)}.json`),
+  );
+  await mkdir(path.dirname(resolved), { recursive: true });
+  await writeFile(resolved, `${JSON.stringify(workflow, null, 2)}\n`);
+  console.log(`Wrote ${path.relative(ROOT, resolved)}`);
+}
+
+async function listDataTableRows(tableId, rawLimit, printRaw = false) {
+  if (!tableId) {
+    throw new Error("Usage: node scripts/n8n.js data-table-rows TABLE_ID [LIMIT] [--raw]");
+  }
+
+  const limit = Math.min(100, Math.max(1, Number.parseInt(rawLimit ?? "100", 10) || 100));
+  const page = await api(`/data-tables/${encodeURIComponent(tableId)}/rows?limit=${limit}`);
+  if (printRaw) {
+    console.log(JSON.stringify(page, null, 2));
+    return;
+  }
+
+  const rows = (page.data ?? page ?? []).map((row) => Object.fromEntries(
+    Object.entries(row)
+      .filter(([key]) => key !== "pdfBase64")
+      .map(([key, value]) => [
+        key,
+        typeof value === "string" && value.length > 500
+          ? `${value.slice(0, 500)}… [${value.length} chars]`
+          : value,
+      ]),
+  ));
+  console.log(JSON.stringify({ data: rows, nextCursor: page.nextCursor ?? null }, null, 2));
+}
+
 async function setActive(id, active) {
   if (!id) {
     throw new Error(`Missing workflow id. Usage: node scripts/n8n.js ${active ? "activate" : "deactivate"} WORKFLOW_ID`);
@@ -225,6 +315,199 @@ async function setActive(id, active) {
   });
 
   console.log(`${active ? "Activated" : "Deactivated"} ${id}`);
+}
+
+async function publishWorkflow(id) {
+  if (!id) {
+    throw new Error("Missing workflow id. Usage: node scripts/n8n.js publish WORKFLOW_ID");
+  }
+
+  await api(`/workflows/${encodeURIComponent(id)}/publish`, { method: "POST" });
+  console.log(`Published ${id}`);
+}
+
+async function listExecutions(workflowId, rawLimit) {
+  if (!workflowId) {
+    throw new Error("Missing workflow id. Usage: node scripts/n8n.js executions WORKFLOW_ID [LIMIT]");
+  }
+
+  const limit = Math.min(100, Math.max(1, Number.parseInt(rawLimit ?? "10", 10) || 10));
+  const query = new URLSearchParams({ workflowId, limit: String(limit) });
+  const page = await api(`/executions?${query}`);
+  for (const execution of page.data ?? []) {
+    console.log([
+      execution.id,
+      execution.status,
+      execution.mode,
+      execution.startedAt ?? "-",
+      execution.stoppedAt ?? "-",
+    ].join("\t"));
+  }
+}
+
+async function executionSummary(id) {
+  if (!id) {
+    throw new Error("Missing execution id. Usage: node scripts/n8n.js execution-summary EXECUTION_ID");
+  }
+
+  const execution = await api(`/executions/${encodeURIComponent(id)}?includeData=true`);
+  const runData = execution.data?.resultData?.runData ?? {};
+  const nodes = {};
+
+  for (const [nodeName, runs] of Object.entries(runData)) {
+    const latest = runs.at(-1) ?? {};
+    const items = latest.data?.main?.flat() ?? [];
+    nodes[nodeName] = {
+      runs: runs.length,
+      itemCount: items.length,
+      jsonKeys: [...new Set(items.flatMap((item) => Object.keys(item?.json ?? {})))].sort(),
+      binaryKeys: [...new Set(items.flatMap((item) => Object.keys(item?.binary ?? {})))].sort(),
+      error: latest.error?.message ?? latest.error?.description ?? null,
+    };
+  }
+
+  console.log(JSON.stringify({
+    id: execution.id,
+    workflowId: execution.workflowId,
+    status: execution.status,
+    mode: execution.mode,
+    startedAt: execution.startedAt,
+    stoppedAt: execution.stoppedAt,
+    lastNodeExecuted: execution.data?.resultData?.lastNodeExecuted ?? null,
+    executionError: execution.data?.resultData?.error?.message ?? null,
+    nodes,
+  }, null, 2));
+}
+
+async function listTestRuns(workflowId, rawLimit) {
+  if (!workflowId) {
+    throw new Error("Missing workflow id. Usage: node scripts/n8n.js test-runs WORKFLOW_ID [LIMIT]");
+  }
+
+  const limit = Math.min(100, Math.max(1, Number.parseInt(rawLimit ?? "20", 10) || 20));
+  const query = new URLSearchParams({ limit: String(limit) });
+  const page = await api(`/workflows/${encodeURIComponent(workflowId)}/test-runs?${query}`);
+  const runs = page.data ?? [];
+  if (runs.length === 0) {
+    console.log("No Evaluation test runs found.");
+    return;
+  }
+  for (const run of runs) {
+    console.log([
+      run.id,
+      run.status,
+      run.runAt ?? run.startedAt ?? run.createdAt ?? "-",
+      run.completedAt ?? run.stoppedAt ?? "-",
+    ].join("\t"));
+  }
+}
+
+async function startTestRun(workflowId) {
+  if (!workflowId) {
+    throw new Error("Missing workflow id. Usage: node scripts/n8n.js start-test-run WORKFLOW_ID");
+  }
+
+  const run = await api(`/workflows/${encodeURIComponent(workflowId)}/test-runs`, {
+    method: "POST",
+  });
+  console.log(JSON.stringify(run, null, 2));
+}
+
+async function cancelTestRun(workflowId, runId) {
+  if (!workflowId || !runId) {
+    throw new Error("Usage: node scripts/n8n.js cancel-test-run WORKFLOW_ID RUN_ID");
+  }
+
+  const run = await api(
+    `/workflows/${encodeURIComponent(workflowId)}/test-runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  );
+  console.log(JSON.stringify(run, null, 2));
+}
+
+async function testRunSummary(workflowId, runId) {
+  if (!workflowId || !runId) {
+    throw new Error("Usage: node scripts/n8n.js test-run-summary WORKFLOW_ID RUN_ID");
+  }
+  const result = await api(`/workflows/${encodeURIComponent(workflowId)}/test-runs/${encodeURIComponent(runId)}`);
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function watchTestRun(workflowId, runId, rawIntervalSeconds) {
+  if (!workflowId || !runId) {
+    throw new Error("Usage: node scripts/n8n.js watch-test-run WORKFLOW_ID RUN_ID [INTERVAL_SECONDS]");
+  }
+
+  const intervalSeconds = Math.min(
+    300,
+    Math.max(5, Number.parseInt(rawIntervalSeconds ?? "30", 10) || 30),
+  );
+  const terminalStatuses = new Set(["completed", "error", "cancelled"]);
+  let lastSignature = "";
+
+  while (true) {
+    const [run, casePage] = await Promise.all([
+      api(`/workflows/${encodeURIComponent(workflowId)}/test-runs/${encodeURIComponent(runId)}`),
+      api(`/workflows/${encodeURIComponent(workflowId)}/test-runs/${encodeURIComponent(runId)}/test-cases?limit=100`),
+    ]);
+    const testCases = casePage.data ?? [];
+    const counts = Object.fromEntries(
+      [...new Set(testCases.map((testCase) => testCase.status))]
+        .sort()
+        .map((status) => [status, testCases.filter((testCase) => testCase.status === status).length]),
+    );
+    const current = testCases.find((testCase) => testCase.status === "running");
+    const signature = JSON.stringify({ status: run.status, counts, current: current?.inputs?.fileName ?? null });
+
+    if (signature !== lastSignature || terminalStatuses.has(run.status)) {
+      console.log(JSON.stringify({
+        checkedAt: new Date().toISOString(),
+        runId,
+        status: run.status,
+        counts,
+        current: current ? {
+          caseId: current.inputs?.caseId ?? null,
+          fileName: current.inputs?.fileName ?? null,
+        } : null,
+        metrics: run.metrics ?? null,
+        errorCode: run.errorCode ?? null,
+        errorDetails: run.errorDetails ?? null,
+      }));
+      lastSignature = signature;
+    }
+
+    if (terminalStatuses.has(run.status)) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalSeconds * 1000));
+  }
+}
+
+async function listTestCases(workflowId, runId, rawLimit, printRaw = false) {
+  if (!workflowId || !runId) {
+    throw new Error("Usage: node scripts/n8n.js test-cases WORKFLOW_ID RUN_ID [LIMIT]");
+  }
+  const limit = Math.min(100, Math.max(1, Number.parseInt(rawLimit ?? "100", 10) || 100));
+  const query = new URLSearchParams({ limit: String(limit) });
+  const result = await api(`/workflows/${encodeURIComponent(workflowId)}/test-runs/${encodeURIComponent(runId)}/test-cases?${query}`);
+  if (printRaw) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  const cases = (result.data ?? result ?? []).map((testCase) => ({
+    id: testCase.id,
+    status: testCase.status,
+    caseId: testCase.inputs?.caseId ?? null,
+    fileName: testCase.inputs?.fileName ?? null,
+    correlationKey: testCase.inputs?.correlationKey ?? null,
+    runAt: testCase.runAt ?? null,
+    completedAt: testCase.completedAt ?? null,
+    metrics: testCase.metrics ?? null,
+    errorCode: testCase.errorCode ?? null,
+    errorDetails: testCase.errorDetails ?? null,
+    executionId: testCase.executionId ?? null,
+    outputKeys: Object.keys(testCase.outputs ?? {}),
+  }));
+  console.log(JSON.stringify({ data: cases, nextCursor: result.nextCursor ?? null }, null, 2));
 }
 
 async function getAllWorkflows() {
@@ -348,10 +631,22 @@ function printUsage() {
   node scripts/n8n.js check
   node scripts/n8n.js list
   node scripts/n8n.js validate [file-or-dir]
-  node scripts/n8n.js deploy [file-or-dir] [--activate]
-  node scripts/n8n.js update [file-or-dir] [--activate]
-  node scripts/n8n.js sync [file-or-dir] [--activate]
+  node scripts/n8n.js deploy [file-or-dir] [--activate] [--publish]
+  node scripts/n8n.js update [file-or-dir] [--activate] [--publish]
+  node scripts/n8n.js sync [file-or-dir] [--activate] [--publish]
   node scripts/n8n.js pull [output-dir]
+  node scripts/n8n.js workflow WORKFLOW_ID
+  node scripts/n8n.js pull-workflow WORKFLOW_ID [TARGET_FILE]
+  node scripts/n8n.js data-table-rows TABLE_ID [LIMIT] [--raw]
   node scripts/n8n.js activate WORKFLOW_ID
-  node scripts/n8n.js deactivate WORKFLOW_ID`);
+  node scripts/n8n.js deactivate WORKFLOW_ID
+  node scripts/n8n.js publish WORKFLOW_ID
+  node scripts/n8n.js executions WORKFLOW_ID [LIMIT]
+  node scripts/n8n.js execution-summary EXECUTION_ID
+  node scripts/n8n.js test-runs WORKFLOW_ID [LIMIT]
+  node scripts/n8n.js start-test-run WORKFLOW_ID
+  node scripts/n8n.js cancel-test-run WORKFLOW_ID RUN_ID
+  node scripts/n8n.js test-run-summary WORKFLOW_ID RUN_ID
+  node scripts/n8n.js watch-test-run WORKFLOW_ID RUN_ID [INTERVAL_SECONDS]
+  node scripts/n8n.js test-cases WORKFLOW_ID RUN_ID [LIMIT] [--raw]`);
 }
