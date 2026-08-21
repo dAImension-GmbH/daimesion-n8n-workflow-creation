@@ -64,14 +64,27 @@ Deploy the Outlook certificate analysis workflow:
 node scripts/n8n.js sync workflows/outlook-certificate-analysis.json
 ```
 
-The certificate workflow analyzes each Outlook message independently. PDF
+The certificate automation is split into a one-minute Outlook dispatcher and a
+single-message worker. The dispatcher treats unread messages as its queue,
+claims at most five messages with the `DAIMENSION-PROCESSING` Outlook category,
+and starts one asynchronous worker execution for each claimed message. Overflow
+stays unread until a slot becomes free. A worker renews its lease during long
+MinerU and DeepSeek stages. A message without a heartbeat for 15 minutes is
+retried up to three times; after the third stale attempt it remains unread with the
+`DAIMENSION-FAILED` category. On first activation, the dispatcher includes the
+unread backlog from the preceding 24 hours. Successful messages are marked read
+and have the queue categories removed.
+
+The certificate worker analyzes each Outlook message independently. PDF
 attachments are uploaded to dataset `4037` through
 `https://pdf.daimension.ai/api/v1/documents/pdf`. A stable numeric case number
 is derived from the mail correlation key. The workflow polls the asynchronous
 MinerU job and retrieves its Markdown, plain text, and page results. As soon as
 a certificate's PDF-to-text extraction succeeds, the extracted text passes
 through evidence extraction, schema normalization, and final review with
-`deepseek-v4-flash-3107` at dAImension.ai. At the end, the workflow creates a
+`deepseek-v4-flash-3107` at dAImension.ai. Evidence blocks are processed one at
+a time with a short pause, and transient DeepSeek failures are retried up to
+three times with a delay. At the end, the workflow creates a
 review in the BUHLMANN Document Review Tool and uploads both the original PDF
 and the complete normalized analysis. Reviewers can compare the source
 document and extracted values side by side at `/document-review`, correct the
@@ -96,13 +109,79 @@ to an external service:
 npm run test:certificate -- "/absolute/path/to/certificate.pdf"
 ```
 
+Validate the dispatcher burst, queue, retry, and worker hand-off behavior
+without connecting to Outlook:
+
+```sh
+npm run test:email-queue
+```
+
+## Certificate evaluations
+
+The worker contains a configured n8n Evaluation Trigger named
+`When fetching a dataset row`. It reads every row from the
+`Certificate OCR and Extraction Evaluation` Data Table and passes the PDF to
+`Evaluations-PDF vorbereiten`. The PDF then joins the production path directly
+before `PDF-Upload vorbereiten`, so evaluations use the same
+`pdf.daimension.ai` MinerU/OCR endpoint and the same dAImension LLM extraction
+as real email certificates.
+
+After extraction, `Mit DeepSeek bewerten` compares only the facts in
+`expectedAnswer` with the actual structured result. `Evaluation – Ergebnis
+speichern` writes `actualAnswer`, `judgeScore`, `judgeReasoning`, and `passed`
+back to the dataset. `Evaluation – Metriken setzen` records `correctness`
+(1–5, displayed by n8n as a normalized percentage) and `Pass rate` (0 or 1) in
+n8n's Evaluations tab. Evaluation executions
+do not create document reviews or send/update Outlook messages.
+
+For a manual canvas test, execute from `Evaluations-Eingang (manuell)`. The
+intermediate `Evaluationsfall manuell laden` node loads the oldest dataset row;
+executing the preparation Code node without either that loader or an Evaluation
+test run has no dataset input and is intentionally rejected.
+Manual evaluation-path runs terminate at `Evaluations-Ergebnis (manuell)` and
+do not create a document review or send/update Outlook messages. Set Outputs
+is skipped during a manual execution because only a real Evaluation Trigger run
+has a dataset row identity to update.
+
+Prepare the workflow and provision the nine PDF rows plus the OpenAI-compatible
+dAImension judge credential:
+
+```sh
+npm run prepare:evaluations
+npm run setup:evaluations
+```
+
+The workflow is fully configured after these commands. Start the nine-case run
+from the Evaluations tab or through the repository helper:
+
+```sh
+node scripts/n8n.js start-test-run oLtOyTcKU11RrNJC
+node scripts/n8n.js test-runs oLtOyTcKU11RrNJC
+```
+
+To prepare a temporary single-case trigger for debugging or retrying one row,
+set `EVALUATION_CASE_ID` while preparing and publish that draft. Run
+`npm run prepare:evaluations` again without the variable afterward to restore
+the normal all-row trigger.
+
+```sh
+EVALUATION_CASE_ID=silcotub-02-25-25339 npm run prepare:evaluations
+```
+
+Set `CERTIFICATE_PDF_DIR` if the nine source PDFs are not in
+`/Users/mdklause/Downloads`. Re-running setup is idempotent by `caseId` and
+does not duplicate existing rows.
+
 The regression checks the source values, compiles every n8n Code node, executes
 the evidence-block and critical-source selection, repairs common malformed LLM
 JSON responses, and verifies position-preserving chemical and dimension
 normalization.
 
 Before activation, configure the Microsoft Outlook OAuth2 credential on the
-trigger and all reply nodes. Also verify the token stored in the n8n Bearer
+dispatcher and all worker reply/update nodes. The credential needs
+`Mail.ReadWrite` and `Mail.Send` so the automation can claim messages with
+categories and mark only successfully processed messages as read. Also verify
+the token stored in the n8n Bearer
 credential `Daimension LLM Bearer Auth`. If its HTTP Request domains are
 restricted, allow both hostnames `llm-inference.daimension.ai` and
 `pdf.daimension.ai` without URL schemes or paths. Create a second n8n Bearer
@@ -124,6 +203,15 @@ Deploy and activate:
 node scripts/n8n.js deploy workflows/hello-manual.json --activate
 ```
 
+For the Outlook automation, deploy the worker first, then deploy and activate
+the dispatcher. The worker keeps its existing workflow id and is called by the
+dispatcher; it no longer polls Outlook directly.
+
+```sh
+node scripts/n8n.js update workflows/outlook-certificate-analysis.json --activate
+node scripts/n8n.js deploy workflows/outlook-certificate-dispatcher.json --activate
+```
+
 Update existing workflows in n8n without creating missing ones:
 
 ```sh
@@ -140,6 +228,20 @@ Synchronize local workflows with n8n. This deploys local workflow JSON and write
 
 ```sh
 npm run sync
+```
+
+Add `--publish` when the synchronized draft must immediately become the
+published production version:
+
+```sh
+node scripts/n8n.js sync workflows/outlook-certificate-analysis.json --publish
+```
+
+Inspect or back up one workflow without overwriting others:
+
+```sh
+node scripts/n8n.js workflow WORKFLOW_ID
+node scripts/n8n.js pull-workflow WORKFLOW_ID workflows/workflow-name.json
 ```
 
 Pull all workflows from n8n into `workflows/exported/`:

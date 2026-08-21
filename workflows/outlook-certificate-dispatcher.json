@@ -1,0 +1,796 @@
+{
+  "updatedAt": "2026-08-21T10:23:37.072Z",
+  "createdAt": "2026-08-21T10:08:57.782Z",
+  "id": "1yU6MAqxo9J0bLZD",
+  "name": "Outlook Certificate Dispatcher (max 5 parallel)",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "7e302e38-34bb-46bb-bb4b-77d62da0a5e2",
+      "name": "Jede Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": true,
+        "output": "fields",
+        "fields": [
+          "id",
+          "internetMessageId",
+          "conversationId",
+          "subject",
+          "from",
+          "receivedDateTime",
+          "lastModifiedDateTime",
+          "categories",
+          "isRead",
+          "hasAttachments"
+        ],
+        "filtersUI": {
+          "values": {
+            "filterBy": "filters",
+            "filters": {
+              "readStatus": "unread"
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "76b8055f-b373-424c-936b-cbe05ca0e437",
+      "name": "Ungelesene Outlook-Mails",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        120
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "GDh0WTvXD06I3uyw",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "webhookId": "5746e68c-62c0-4991-ba62-aab2dc12eeab"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const PROCESSING = 'DAIMENSION-PROCESSING';\nconst FAILED = 'DAIMENSION-FAILED';\nconst ATTEMPT_PREFIX = 'DAIMENSION-ATTEMPT-';\nconst MAX_PARALLEL = 5;\nconst MAX_ATTEMPTS = 3;\nconst LEASE_MS = 15 * 60 * 1000;\nconst OWN_ADDRESS = 'certificates@daimension.de';\n\nconst state = $getWorkflowStaticData('global');\nstate.initialUnreadCutoff ??= new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();\nconst cutoff = Date.parse(state.initialUnreadCutoff);\nconst now = Date.now();\nconst messages = $input.all().map(item => item.json ?? {});\n\nconst categoriesOf = message => Array.isArray(message.categories) ? message.categories.map(String) : [];\nconst attemptOf = categories => {\n  const values = categories\n    .filter(category => category.startsWith(ATTEMPT_PREFIX))\n    .map(category => Number(category.slice(ATTEMPT_PREFIX.length)))\n    .filter(Number.isFinite);\n  return values.length ? Math.max(...values) : 0;\n};\nconst modifiedAt = message => Date.parse(message.lastModifiedDateTime ?? message.receivedDateTime ?? 0) || 0;\nconst senderOf = message => String(message.from?.emailAddress?.address ?? message.from?.address ?? '').trim().toLowerCase();\nconst isFreshProcessing = message => {\n  const categories = categoriesOf(message);\n  return categories.includes(PROCESSING) && now - modifiedAt(message) < LEASE_MS;\n};\n\nconst freshActive = messages.filter(isFreshProcessing).length;\nconst available = Math.max(0, MAX_PARALLEL - freshActive);\nconst output = [];\nconst candidates = [];\n\nfor (const message of messages) {\n  const categories = categoriesOf(message);\n  const attempt = attemptOf(categories);\n  const processing = categories.includes(PROCESSING);\n  const stale = processing && !isFreshProcessing(message);\n  const received = Date.parse(message.receivedDateTime ?? 0) || 0;\n  if (categories.includes(FAILED) || senderOf(message) === OWN_ADDRESS || received < cutoff) continue;\n\n  if (stale && attempt >= MAX_ATTEMPTS) {\n    output.push({ json: {\n      ...message,\n      action: 'fail',\n      attempt,\n      targetCategories: [...new Set(categories.filter(category => category !== PROCESSING).concat(FAILED))]\n    } });\n    continue;\n  }\n\n  if (!processing || stale) candidates.push({ message, categories, attempt });\n}\n\ncandidates.sort((a, b) => (Date.parse(a.message.receivedDateTime ?? 0) || 0) - (Date.parse(b.message.receivedDateTime ?? 0) || 0));\nfor (const candidate of candidates.slice(0, available)) {\n  const nextAttempt = candidate.attempt + 1;\n  const retained = candidate.categories.filter(category => category !== PROCESSING && !category.startsWith(ATTEMPT_PREFIX));\n  output.push({ json: {\n    ...candidate.message,\n    action: 'claim',\n    attempt: nextAttempt,\n    targetCategories: [...new Set(retained.concat(PROCESSING, ATTEMPT_PREFIX + nextAttempt))]\n  } });\n}\n\nreturn output;"
+      },
+      "id": "b09155f6-6c8a-4fa6-a28f-f5f131e8b196",
+      "name": "Queue planen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b1ff1d38-e1a9-4dfc-aa4b-776b9e06a913",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "claim",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d705deed-15ca-45f7-a015-d38961727b1f",
+      "name": "Freien Slot belegen?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        760,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "categories": "={{ $json.targetCategories }}"
+        }
+      },
+      "id": "90b2feb3-e002-44a8-b940-f5a772b237a3",
+      "name": "Mail als in Bearbeitung markieren",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1020,
+        20
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "GDh0WTvXD06I3uyw",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "webhookId": "cb8451d8-07d0-4717-8a40-dfc29a0b7851"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "get",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "output": "fields",
+        "fields": [
+          "id",
+          "conversationId",
+          "internetMessageId",
+          "subject",
+          "body",
+          "bodyPreview",
+          "from",
+          "sender",
+          "receivedDateTime",
+          "lastModifiedDateTime",
+          "categories",
+          "isRead",
+          "hasAttachments"
+        ],
+        "options": {
+          "downloadAttachments": true,
+          "attachmentsPrefix": "attachment_"
+        }
+      },
+      "id": "69b29821-3e5e-43ba-8e86-43718f22e7e3",
+      "name": "Einzelmail mit Anhängen laden",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        20
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "GDh0WTvXD06I3uyw",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "webhookId": "ed75a332-606b-4088-8d3e-15f7bd163d42"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "oLtOyTcKU11RrNJC",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/oLtOyTcKU11RrNJC",
+          "cachedResultName": "Outlook Certificate Analysis (MinerU + DeepSeek)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "f0c68d5b-7342-44a3-b959-5b7fe83a24d4",
+      "name": "Ein Worker pro E-Mail",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1540,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "categories": "={{ $json.targetCategories }}"
+        }
+      },
+      "id": "70c71a46-1128-4bd9-b152-b4980d65faad",
+      "name": "Nach drei Versuchen kennzeichnen",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1020,
+        220
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "GDh0WTvXD06I3uyw",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "webhookId": "3c7e74c3-695c-4dd5-8799-2d7c22ddf444"
+    },
+    {
+      "parameters": {
+        "content": "## Outlook-basierte Queue\n- höchstens 5 Mails mit `DAIMENSION-PROCESSING`\n- weitere Mails bleiben ungelesen\n- Worker werden pro Mail separat gestartet\n- eine verwaiste Bearbeitung wird nach 15 Minuten erneut versucht\n- laufende MinerU- und DeepSeek-Schritte erneuern die Bearbeitungslease\n- nach 3 Versuchen bleibt die Mail ungelesen und erhält `DAIMENSION-FAILED`\n- beim ersten Start werden ungelesene Mails der letzten 24 Stunden berücksichtigt",
+        "height": 360,
+        "width": 520,
+        "color": 5
+      },
+      "id": "20d0c491-04db-48af-9772-36bcb33aca33",
+      "name": "Queue-Verhalten",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        420,
+        -340
+      ]
+    }
+  ],
+  "connections": {
+    "Jede Minute": {
+      "main": [
+        [
+          {
+            "node": "Ungelesene Outlook-Mails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ungelesene Outlook-Mails": {
+      "main": [
+        [
+          {
+            "node": "Queue planen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue planen": {
+      "main": [
+        [
+          {
+            "node": "Freien Slot belegen?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Freien Slot belegen?": {
+      "main": [
+        [
+          {
+            "node": "Mail als in Bearbeitung markieren",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nach drei Versuchen kennzeichnen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail als in Bearbeitung markieren": {
+      "main": [
+        [
+          {
+            "node": "Einzelmail mit Anhängen laden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Einzelmail mit Anhängen laden": {
+      "main": [
+        [
+          {
+            "node": "Ein Worker pro E-Mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Berlin",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "staticData": {
+    "node:Jede Minute": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "2491947a-b8a7-4561-85d1-5c78ee6eb7af",
+  "activeVersionId": "2491947a-b8a7-4561-85d1-5c78ee6eb7af",
+  "versionCounter": 2,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-08-21T10:08:57.782Z",
+      "createdAt": "2026-08-21T10:08:57.782Z",
+      "role": "workflow:owner",
+      "workflowId": "1yU6MAqxo9J0bLZD",
+      "projectId": "rQWJLyrY2gAKELRh",
+      "project": {
+        "updatedAt": "2026-08-05T13:21:12.673Z",
+        "createdAt": "2026-08-05T13:13:03.776Z",
+        "id": "rQWJLyrY2gAKELRh",
+        "name": "Maik Daniel Klause <maik.klaus@daimension.de>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-08-21T10:23:37.073Z",
+    "createdAt": "2026-08-21T10:23:37.073Z",
+    "versionId": "2491947a-b8a7-4561-85d1-5c78ee6eb7af",
+    "workflowId": "1yU6MAqxo9J0bLZD",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 1
+              }
+            ]
+          }
+        },
+        "id": "7e302e38-34bb-46bb-bb4b-77d62da0a5e2",
+        "name": "Jede Minute",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "getAll",
+          "returnAll": true,
+          "output": "fields",
+          "fields": [
+            "id",
+            "internetMessageId",
+            "conversationId",
+            "subject",
+            "from",
+            "receivedDateTime",
+            "lastModifiedDateTime",
+            "categories",
+            "isRead",
+            "hasAttachments"
+          ],
+          "filtersUI": {
+            "values": {
+              "filterBy": "filters",
+              "filters": {
+                "readStatus": "unread"
+              }
+            }
+          },
+          "options": {}
+        },
+        "id": "76b8055f-b373-424c-936b-cbe05ca0e437",
+        "name": "Ungelesene Outlook-Mails",
+        "type": "n8n-nodes-base.microsoftOutlook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          120
+        ],
+        "credentials": {
+          "microsoftOutlookOAuth2Api": {
+            "id": "GDh0WTvXD06I3uyw",
+            "name": "Microsoft Outlook account"
+          }
+        },
+        "webhookId": "5746e68c-62c0-4991-ba62-aab2dc12eeab"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const PROCESSING = 'DAIMENSION-PROCESSING';\nconst FAILED = 'DAIMENSION-FAILED';\nconst ATTEMPT_PREFIX = 'DAIMENSION-ATTEMPT-';\nconst MAX_PARALLEL = 5;\nconst MAX_ATTEMPTS = 3;\nconst LEASE_MS = 15 * 60 * 1000;\nconst OWN_ADDRESS = 'certificates@daimension.de';\n\nconst state = $getWorkflowStaticData('global');\nstate.initialUnreadCutoff ??= new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();\nconst cutoff = Date.parse(state.initialUnreadCutoff);\nconst now = Date.now();\nconst messages = $input.all().map(item => item.json ?? {});\n\nconst categoriesOf = message => Array.isArray(message.categories) ? message.categories.map(String) : [];\nconst attemptOf = categories => {\n  const values = categories\n    .filter(category => category.startsWith(ATTEMPT_PREFIX))\n    .map(category => Number(category.slice(ATTEMPT_PREFIX.length)))\n    .filter(Number.isFinite);\n  return values.length ? Math.max(...values) : 0;\n};\nconst modifiedAt = message => Date.parse(message.lastModifiedDateTime ?? message.receivedDateTime ?? 0) || 0;\nconst senderOf = message => String(message.from?.emailAddress?.address ?? message.from?.address ?? '').trim().toLowerCase();\nconst isFreshProcessing = message => {\n  const categories = categoriesOf(message);\n  return categories.includes(PROCESSING) && now - modifiedAt(message) < LEASE_MS;\n};\n\nconst freshActive = messages.filter(isFreshProcessing).length;\nconst available = Math.max(0, MAX_PARALLEL - freshActive);\nconst output = [];\nconst candidates = [];\n\nfor (const message of messages) {\n  const categories = categoriesOf(message);\n  const attempt = attemptOf(categories);\n  const processing = categories.includes(PROCESSING);\n  const stale = processing && !isFreshProcessing(message);\n  const received = Date.parse(message.receivedDateTime ?? 0) || 0;\n  if (categories.includes(FAILED) || senderOf(message) === OWN_ADDRESS || received < cutoff) continue;\n\n  if (stale && attempt >= MAX_ATTEMPTS) {\n    output.push({ json: {\n      ...message,\n      action: 'fail',\n      attempt,\n      targetCategories: [...new Set(categories.filter(category => category !== PROCESSING).concat(FAILED))]\n    } });\n    continue;\n  }\n\n  if (!processing || stale) candidates.push({ message, categories, attempt });\n}\n\ncandidates.sort((a, b) => (Date.parse(a.message.receivedDateTime ?? 0) || 0) - (Date.parse(b.message.receivedDateTime ?? 0) || 0));\nfor (const candidate of candidates.slice(0, available)) {\n  const nextAttempt = candidate.attempt + 1;\n  const retained = candidate.categories.filter(category => category !== PROCESSING && !category.startsWith(ATTEMPT_PREFIX));\n  output.push({ json: {\n    ...candidate.message,\n    action: 'claim',\n    attempt: nextAttempt,\n    targetCategories: [...new Set(retained.concat(PROCESSING, ATTEMPT_PREFIX + nextAttempt))]\n  } });\n}\n\nreturn output;"
+        },
+        "id": "b09155f6-6c8a-4fa6-a28f-f5f131e8b196",
+        "name": "Queue planen",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          500,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "b1ff1d38-e1a9-4dfc-aa4b-776b9e06a913",
+                "leftValue": "={{ $json.action }}",
+                "rightValue": "claim",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "d705deed-15ca-45f7-a015-d38961727b1f",
+        "name": "Freien Slot belegen?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          760,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "update",
+          "messageId": {
+            "__rl": true,
+            "value": "={{ $json.id }}",
+            "mode": "id"
+          },
+          "updateFields": {
+            "categories": "={{ $json.targetCategories }}"
+          }
+        },
+        "id": "90b2feb3-e002-44a8-b940-f5a772b237a3",
+        "name": "Mail als in Bearbeitung markieren",
+        "type": "n8n-nodes-base.microsoftOutlook",
+        "typeVersion": 2,
+        "position": [
+          1020,
+          20
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "credentials": {
+          "microsoftOutlookOAuth2Api": {
+            "id": "GDh0WTvXD06I3uyw",
+            "name": "Microsoft Outlook account"
+          }
+        },
+        "webhookId": "cb8451d8-07d0-4717-8a40-dfc29a0b7851"
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "get",
+          "messageId": {
+            "__rl": true,
+            "value": "={{ $json.id }}",
+            "mode": "id"
+          },
+          "output": "fields",
+          "fields": [
+            "id",
+            "conversationId",
+            "internetMessageId",
+            "subject",
+            "body",
+            "bodyPreview",
+            "from",
+            "sender",
+            "receivedDateTime",
+            "lastModifiedDateTime",
+            "categories",
+            "isRead",
+            "hasAttachments"
+          ],
+          "options": {
+            "downloadAttachments": true,
+            "attachmentsPrefix": "attachment_"
+          }
+        },
+        "id": "69b29821-3e5e-43ba-8e86-43718f22e7e3",
+        "name": "Einzelmail mit Anhängen laden",
+        "type": "n8n-nodes-base.microsoftOutlook",
+        "typeVersion": 2,
+        "position": [
+          1280,
+          20
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "credentials": {
+          "microsoftOutlookOAuth2Api": {
+            "id": "GDh0WTvXD06I3uyw",
+            "name": "Microsoft Outlook account"
+          }
+        },
+        "webhookId": "ed75a332-606b-4088-8d3e-15f7bd163d42"
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "oLtOyTcKU11RrNJC",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/oLtOyTcKU11RrNJC",
+            "cachedResultName": "Outlook Certificate Analysis (MinerU + DeepSeek)"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "mode": "each",
+          "options": {
+            "waitForSubWorkflow": false
+          }
+        },
+        "id": "f0c68d5b-7342-44a3-b959-5b7fe83a24d4",
+        "name": "Ein Worker pro E-Mail",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          1540,
+          20
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "update",
+          "messageId": {
+            "__rl": true,
+            "value": "={{ $json.id }}",
+            "mode": "id"
+          },
+          "updateFields": {
+            "categories": "={{ $json.targetCategories }}"
+          }
+        },
+        "id": "70c71a46-1128-4bd9-b152-b4980d65faad",
+        "name": "Nach drei Versuchen kennzeichnen",
+        "type": "n8n-nodes-base.microsoftOutlook",
+        "typeVersion": 2,
+        "position": [
+          1020,
+          220
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "credentials": {
+          "microsoftOutlookOAuth2Api": {
+            "id": "GDh0WTvXD06I3uyw",
+            "name": "Microsoft Outlook account"
+          }
+        },
+        "webhookId": "3c7e74c3-695c-4dd5-8799-2d7c22ddf444"
+      },
+      {
+        "parameters": {
+          "content": "## Outlook-basierte Queue\n- höchstens 5 Mails mit `DAIMENSION-PROCESSING`\n- weitere Mails bleiben ungelesen\n- Worker werden pro Mail separat gestartet\n- eine verwaiste Bearbeitung wird nach 15 Minuten erneut versucht\n- laufende MinerU- und DeepSeek-Schritte erneuern die Bearbeitungslease\n- nach 3 Versuchen bleibt die Mail ungelesen und erhält `DAIMENSION-FAILED`\n- beim ersten Start werden ungelesene Mails der letzten 24 Stunden berücksichtigt",
+          "height": 360,
+          "width": 520,
+          "color": 5
+        },
+        "id": "20d0c491-04db-48af-9772-36bcb33aca33",
+        "name": "Queue-Verhalten",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          420,
+          -340
+        ]
+      }
+    ],
+    "connections": {
+      "Jede Minute": {
+        "main": [
+          [
+            {
+              "node": "Ungelesene Outlook-Mails",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ungelesene Outlook-Mails": {
+        "main": [
+          [
+            {
+              "node": "Queue planen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Queue planen": {
+        "main": [
+          [
+            {
+              "node": "Freien Slot belegen?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Freien Slot belegen?": {
+        "main": [
+          [
+            {
+              "node": "Mail als in Bearbeitung markieren",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Nach drei Versuchen kennzeichnen",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mail als in Bearbeitung markieren": {
+        "main": [
+          [
+            {
+              "node": "Einzelmail mit Anhängen laden",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Einzelmail mit Anhängen laden": {
+        "main": [
+          [
+            {
+              "node": "Ein Worker pro E-Mail",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Maik Daniel Klause",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-08-21T10:23:37.113Z",
+        "id": 69,
+        "workflowId": "1yU6MAqxo9J0bLZD",
+        "versionId": "2491947a-b8a7-4561-85d1-5c78ee6eb7af",
+        "event": "deactivated",
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      },
+      {
+        "createdAt": "2026-08-21T10:23:37.134Z",
+        "id": 70,
+        "workflowId": "1yU6MAqxo9J0bLZD",
+        "versionId": "2491947a-b8a7-4561-85d1-5c78ee6eb7af",
+        "event": "activated",
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      },
+      {
+        "createdAt": "2026-08-21T10:23:37.267Z",
+        "id": 71,
+        "workflowId": "1yU6MAqxo9J0bLZD",
+        "versionId": "2491947a-b8a7-4561-85d1-5c78ee6eb7af",
+        "event": "deactivated",
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      },
+      {
+        "createdAt": "2026-08-21T10:23:37.293Z",
+        "id": 72,
+        "workflowId": "1yU6MAqxo9J0bLZD",
+        "versionId": "2491947a-b8a7-4561-85d1-5c78ee6eb7af",
+        "event": "activated",
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b"
+      }
+    ]
+  }
+}

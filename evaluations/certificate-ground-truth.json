@@ -1,0 +1,106 @@
+[
+  {
+    "caseId": "unicorn-2026-102898",
+    "fileName": "Unicorn_1.pdf",
+    "subject": "Evaluation – Unicorn inspection certificate 2026-102898",
+    "correlationKey": "PO-25-RFS003046",
+    "expected": {
+      "certificateNumber": "2026-102898",
+      "customerOrderNumber": "PO-25-RFS003046",
+      "creditor": "Unicorn GmbH Tailormade Processing",
+      "positions": [
+        { "heatNumber": "475670", "quantity": 2, "dimensions": "193.7 x 22.2 mm", "material": "1.4541", "yieldStrength02": 233, "yieldStrength10": 278, "tensileStrength": 529, "elongation": 42.9 },
+        { "heatNumber": "901972", "quantity": 2, "dimensions": "133.0 x 14.2 mm", "material": "1.4541", "yieldStrength02": 259, "yieldStrength10": 293, "elongation": 50.1 }
+      ]
+    }
+  },
+  {
+    "caseId": "venus-vptl-exp-mtc-26-1233",
+    "fileName": "Venus.pdf",
+    "subject": "Evaluation – Venus VPTL/EXP/MTC/26/1233",
+    "correlationKey": "PO-24-0012405",
+    "expected": {
+      "certificateNumber": "VPTL/EXP/MTC/26/1233",
+      "customerOrderNumber": "PO-24-0012405",
+      "positions": [{ "heatNumber": "N3164", "quantity": 53, "dimensions": "35.00 x 3.00 mm", "material": "TP316Ti / 1.4571", "yieldStrength02": [279.26, 327.21], "yieldStrength10": [301.87, 358.29], "tensileStrength": [608.63, 613.85], "elongation": [63, 64] }]
+    }
+  },
+  {
+    "caseId": "starofit-26030318",
+    "fileName": "Starofit_2.pdf",
+    "subject": "Evaluation – Starofit certificate 26030318",
+    "correlationKey": "PO-26-RFS003506",
+    "expected": {
+      "certificateNumber": "26030318",
+      "customerOrderNumber": "PO-26-RFS003506",
+      "positions": [{ "heatNumber": "333691", "quantity": 2, "product": "Eccentric reducer DIN EN 10253-2 Type A", "dimensions": "219.10 x 7.10 / 88.90 x 4.00 mm", "material": "P235GH", "yieldStrength02": 306, "tensileStrength": 447, "elongation": 35 }]
+    }
+  },
+  {
+    "caseId": "bk-tuev-w089986",
+    "fileName": "B+K_Tuev.pdf",
+    "subject": "Evaluation – B+K TÜV certificate W089986",
+    "correlationKey": "PO-25-0012289",
+    "expected": {
+      "certificateNumber": "W089986",
+      "customerOrderNumber": "PO-25-0012289",
+      "positions": [{ "heatNumber": "245086", "quantity": 12, "product": "T-piece / tee", "material": "1.4541", "yieldStrength02": 284, "yieldStrength10": 317, "tensileStrength": 547, "elongation": 52.5 }]
+    }
+  },
+  {
+    "caseId": "silcotub-02-25-25339",
+    "fileName": "Silcotub_2.pdf",
+    "subject": "Evaluation – Silcotub certificate 02-25-25339",
+    "correlationKey": "PO-25-0007714",
+    "expected": {
+      "certificateNumber": "02-25-25339",
+      "customerOrderNumber": "PO-25-0007714",
+      "positions": [{ "heatNumber": "938166", "quantity": 13, "dimensions": "114.30 x 16.00 mm", "material": "X10CrMoVNb9-1 / P91 Type 2", "yieldStrength02": [512, 511, 509], "tensileStrength": [679, 683], "elongation": [37.5, 40, 26, 28] }]
+    }
+  },
+  {
+    "caseId": "silcotub-02-26-07006",
+    "fileName": "Silcotub_1.pdf",
+    "subject": "Evaluation – Silcotub certificate 02-26-07006",
+    "correlationKey": "PO-25-RFS002563",
+    "expected": {
+      "certificateNumber": "02-26-07006",
+      "customerOrderNumber": "PO-25-RFS002563",
+      "positions": [{ "heatNumber": "753932", "quantity": 22, "dimensions": "57.00 x 3.60 mm", "material": "P235GH TC2", "yieldStrength02": [279, 307], "tensileStrength": [416, 425], "elongation": [30.5, 36] }]
+    }
+  },
+  {
+    "caseId": "lindemann-wz-00063408",
+    "fileName": "Lindemann.pdf",
+    "subject": "Evaluation – Lindemann composite certificate WZ-00063408",
+    "correlationKey": "PO-26-RFS001721",
+    "expected": {
+      "certificateNumber": "WZ-00063408",
+      "customerOrderNumber": "PO-26-RFS001721",
+      "positions": [{ "heatNumber": "57495K", "quantity": 15, "product": "Seamless elbows EN 10253-2 Type A", "dimensions": "323.9 x 6.3 mm", "material": "P235GH TC1", "yieldStrength02": 303, "tensileStrength": 425, "elongation": 35.4 }],
+      "rawMaterialCertificate": "73958/23"
+    }
+  },
+  {
+    "caseId": "jmd-100000125315",
+    "fileName": "JMD.pdf",
+    "subject": "Evaluation – JMD certificate 100000125315",
+    "correlationKey": "PO-25-0006028",
+    "expected": {
+      "certificateNumber": "100000125315",
+      "customerOrderNumber": "PO-25-0006028",
+      "positions": [{ "heatNumber": "Z4195", "quantity": 53, "product": "1-inch welding neck flange, class 150, Sch-40s RF", "material": "F316/F316L ASTM A182M", "yieldStrength02": 256.52, "yieldStrength10": 300.52, "tensileStrength": 551.18, "elongation": 62.2 }]
+    }
+  },
+  {
+    "caseId": "dalmine-01-26-02987",
+    "fileName": "Dalmine_1.pdf",
+    "subject": "Evaluation – Dalmine certificate 01-26-02987",
+    "correlationKey": "PO-25-BBT000155",
+    "expected": {
+      "certificateNumber": "01-26-02987",
+      "customerOrderNumber": "PO-25-BBT000155",
+      "positions": [{ "heatNumber": "956643", "quantity": 1, "dimensions": "168.30 x 12.50 mm", "material": "16Mo3 TC2", "yieldStrength02": [367, 364, 369], "tensileStrength": [499, 498, 507], "elongation": [25.5, 27, 23.5] }]
+    }
+  }
+]
