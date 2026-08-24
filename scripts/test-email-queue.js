@@ -115,6 +115,89 @@ assert(rememberedTargets.includes("Outlook-Mail erfolgreich abschließen"), "Rem
 const reviewCreate = worker.nodes.find((node) => node.name === "Dokumentenreview anlegen");
 assert(reviewCreate?.parameters?.jsonBody === "={{ $json.reviewCreateRequest }}", "Document review retries must use the stable mail-based clientRequestId");
 
+const reviewPrepare = worker.nodes.find((node) => node.name === "Dokumentenreview-Upload vorbereiten");
+assert(reviewPrepare?.parameters?.jsCode, "Document review upload preparation is missing");
+const chemicalKeys = ["C", "SI", "S", "P", "SN", "MN", "CR", "NI", "MO", "TI", "CO", "CU", "N", "AL", "V", "NB", "B", "Zr", "W", "Sb", "As", "AL/N", "Nb+(V2,5)", "Nb+V+Ti", "Mn/C", "CEV", "V+NB", "Ni+Cu", "Cu+Ni+Cr+Mo+V", "Cr+Cu+Mo+Ni", "Cu+Mo"];
+const reviewAnalysisKeys = [
+  "heatNumber", "chemicals", "yieldStrength02", "yieldStrength10", "tensileStrength", "elongation",
+  "certificateNumber", "quantity", "creditor", "product", "humanRequired", "customerOrderNumber",
+  "orderLine", "dimensions", "werkstoff1", "werkstoff2", "werkstoff3", "werkstoff4", "werkstoff5",
+  "norm1", "norm2", "norm3", "norm4", "norm5",
+].sort();
+const fixturePdf = Buffer.from("%PDF-document-review-contract-fixture");
+const sharedOutlookPrefix = "AAMkAGY1MjQ0ZmM5LTVjZGYtNDE2ZS05MGU4LWQwYzQ5MzUyM2Y3ZABGAAAAAABUEV3A5KOGQrRpvxJuKU2_BwB-Nq-JOOcxR52dAYWe";
+
+async function prepareReview(mailId, orderLine) {
+  const resultRow = {
+    heatNumber: "760491",
+    chemicals: Object.fromEntries(chemicalKeys.map((key) => [key, key === "C" ? 0.18 : -1])),
+    yieldStrength02: 334,
+    yieldStrength10: -1,
+    tensileStrength: 521,
+    elongation: 27.5,
+    certificateNumber: "02-26-15374",
+    rawMaterialCertificate: "RAW-123",
+    quantity: 207.67,
+    creditor: "Silcotub S.A. Plant",
+    product: "Seamless hot finished steel tubes for boilers",
+    humanRequired: false,
+    customerOrderNumber: "PO-26-RFS004402",
+    ...(orderLine === undefined ? {} : { orderLine }),
+    dimensions: "57.00 x 8.00 mm",
+    werkstoff1: "16Mo3 TC2",
+    werkstoff2: "-1",
+    werkstoff3: "-1",
+    werkstoff4: "-1",
+    werkstoff5: "-1",
+    norm1: "EN 10216-2 TC2",
+    norm2: "-1",
+    norm3: "-1",
+    norm4: "-1",
+    norm5: "-1",
+  };
+  const inputItems = [
+    { json: {}, binary: { data: { fileName: "Review fixture.pdf", mimeType: "application/pdf" } } },
+    {
+      json: {
+        correlationKey: "PO-26-RFS004402",
+        sourceMails: { certificate: { id: mailId, fileName: "Review fixture.pdf" } },
+        results: [resultRow],
+      },
+    },
+  ];
+  const input = { all: () => inputItems };
+  const helpers = {
+    getBinaryDataBuffer: async (index, propertyName) => {
+      assert(index === 0 && propertyName === "data", "Review preparation must read the original PDF binary");
+      return fixturePdf;
+    },
+    prepareBinaryData: async (buffer, fileName, mimeType) => ({
+      data: buffer.toString("base64"), fileName, mimeType,
+    }),
+  };
+  const factory = new Function("$input", `return async function () {\n${reviewPrepare.parameters.jsCode}\n}`);
+  return factory(input).call({ helpers });
+}
+
+const firstReview = (await prepareReview(`${sharedOutlookPrefix}-FIRST`))[0];
+const firstReviewRepeat = (await prepareReview(`${sharedOutlookPrefix}-FIRST`))[0];
+const secondReview = (await prepareReview(`${sharedOutlookPrefix}-SECOND`, "00020"))[0];
+const firstRequest = firstReview.json.reviewCreateRequest;
+const secondRequest = secondReview.json.reviewCreateRequest;
+assert(firstRequest.fileName === "Review fixture.pdf", "Document review must preserve a safe PDF filename");
+assert(firstRequest.sizeBytes === fixturePdf.length, "Document review must declare the exact PDF size");
+assert(firstRequest.analysis[0].quantity === "207.67", "Document review quantity must be serialized as text");
+assert(firstRequest.analysis[0].orderLine === "-1", "Missing document review orderLine must use the -1 sentinel");
+assert(secondRequest.analysis[0].orderLine === "00020", "Document review must preserve an available orderLine");
+assert(firstRequest.analysis[0].humanRequired === true, "Document review rows must require human confirmation");
+assert(!Object.hasOwn(firstRequest.analysis[0], "rawMaterialCertificate"), "Unsupported rawMaterialCertificate must not be sent to Document Review");
+assert(JSON.stringify(Object.keys(firstRequest.analysis[0]).sort()) === JSON.stringify(reviewAnalysisKeys), "Document review analysis must contain exactly the API contract fields");
+assert(firstReview.json.results[0].quantity === 207.67, "Internal results must preserve numeric quantity");
+assert(firstReview.json.results[0].rawMaterialCertificate === "RAW-123", "Internal results must preserve rawMaterialCertificate");
+assert(firstRequest.clientRequestId === firstReviewRepeat.json.reviewCreateRequest.clientRequestId, "Document review idempotency key must be stable for the same mail");
+assert(firstRequest.clientRequestId !== secondRequest.clientRequestId, "Document review idempotency keys must distinguish long Outlook IDs with a shared prefix");
+assert(firstRequest.clientRequestId.startsWith("n8n-certificate-") && firstRequest.clientRequestId.length <= 120, "Document review idempotency key must satisfy the API length contract");
+
 for (const retryNodeName of [
   "MinerU-Status prüfen",
   "PDF mit MinerU lesen",
