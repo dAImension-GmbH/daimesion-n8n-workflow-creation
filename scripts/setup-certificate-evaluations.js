@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TABLE_NAME = "Certificate OCR and Extraction Evaluation";
-const CREDENTIAL_NAME = "Daimension OpenAI-compatible Eval Judge";
 const PDF_DIR = process.env.CERTIFICATE_PDF_DIR || "/Users/mdklause/Downloads";
+const expectedOnly = process.argv.includes("--expected-only");
 const REQUIRED_COLUMNS = [
   { name: "caseId", type: "string" },
   { name: "fileName", type: "string" },
@@ -18,6 +18,9 @@ const REQUIRED_COLUMNS = [
   { name: "actualAnswer", type: "string" },
   { name: "judgeScore", type: "number" },
   { name: "judgeReasoning", type: "string" },
+  { name: "chemistryScore", type: "number" },
+  { name: "chemistryReasoning", type: "string" },
+  { name: "chemistryPassed", type: "number" },
   { name: "passed", type: "number" }
 ];
 
@@ -36,8 +39,8 @@ function loadEnv() {
 loadEnv();
 const baseUrl = process.env.N8N_BASE_URL?.replace(/\/+$/, "");
 const apiKey = process.env.N8N_API_KEY;
-if (!baseUrl || !apiKey || !process.env.DAIMENSION_API_KEY) {
-  throw new Error("N8N_BASE_URL, N8N_API_KEY and DAIMENSION_API_KEY must be set in .env");
+if (!baseUrl || !apiKey) {
+  throw new Error("N8N_BASE_URL and N8N_API_KEY must be set in .env");
 }
 
 async function api(route, options = {}) {
@@ -63,6 +66,9 @@ const cases = JSON.parse(readFileSync(path.join(ROOT, "evaluations/certificate-g
 
 const tables = (await api("/data-tables?limit=100")).data ?? [];
 let table = tables.find((entry) => entry.name === TABLE_NAME);
+if (!table && expectedOnly) {
+  throw new Error(`Data Table ${TABLE_NAME} does not exist; --expected-only cannot create the initial dataset.`);
+}
 if (!table) {
   table = await api("/data-tables", {
     method: "POST",
@@ -75,8 +81,13 @@ if (!table) {
 }
 
 const existingColumns = await api(`/data-tables/${table.id}/columns`);
-const existingColumnNames = new Set((existingColumns.data ?? existingColumns ?? []).map((column) => column.name));
+const columns = existingColumns.data ?? existingColumns ?? [];
+const existingColumnNames = new Set(columns.map((column) => column.name));
 for (const column of REQUIRED_COLUMNS) {
+  const existing = columns.find((entry) => entry.name === column.name);
+  if (existing && existing.type !== column.type) {
+    throw new Error(`Data Table column ${column.name} has type ${existing.type}; expected ${column.type}`);
+  }
   if (existingColumnNames.has(column.name)) continue;
   await api(`/data-tables/${table.id}/columns`, {
     method: "POST",
@@ -84,54 +95,80 @@ for (const column of REQUIRED_COLUMNS) {
   });
 }
 
-const existingRows = await api(`/data-tables/${table.id}/rows?limit=100`);
-const existingCaseIds = new Set((existingRows.data ?? existingRows ?? []).map((row) => row.caseId));
+if (expectedOnly) {
+  const existingRowsPage = await api(`/data-tables/${table.id}/rows?limit=100`);
+  const existingCaseIds = new Set((existingRowsPage.data ?? existingRowsPage ?? []).map((row) => row.caseId));
+  const missingCaseIds = cases.map((testCase) => testCase.caseId).filter((caseId) => !existingCaseIds.has(caseId));
+  if (missingCaseIds.length) throw new Error(`Cannot update expected answers; missing cases: ${missingCaseIds.join(", ")}`);
+}
+
 for (const testCase of cases) {
-  if (existingCaseIds.has(testCase.caseId)) continue;
-  const pdfPath = path.join(PDF_DIR, testCase.fileName);
-  const pdf = readFileSync(pdfPath);
-  if (!pdf.subarray(0, 4).equals(Buffer.from("%PDF"))) throw new Error(`${pdfPath} is not a PDF`);
-  await api(`/data-tables/${table.id}/rows`, {
+  let data;
+  if (expectedOnly) {
+    data = { expectedAnswer: JSON.stringify(testCase.expected) };
+  } else {
+    const pdfPath = path.join(PDF_DIR, testCase.fileName);
+    const pdf = readFileSync(pdfPath);
+    if (!pdf.subarray(0, 4).equals(Buffer.from("%PDF"))) throw new Error(`${pdfPath} is not a PDF`);
+    data = {
+      caseId: testCase.caseId,
+      fileName: testCase.fileName,
+      subject: testCase.subject,
+      correlationKey: testCase.correlationKey,
+      pdfBase64: pdf.toString("base64"),
+      expectedAnswer: JSON.stringify(testCase.expected),
+      actualAnswer: "",
+      judgeScore: -1,
+      judgeReasoning: "Not evaluated after latest setup",
+      chemistryScore: 0,
+      chemistryReasoning: "Not evaluated after latest setup",
+      chemistryPassed: 0,
+      passed: 0
+    };
+  }
+  await api(`/data-tables/${table.id}/rows/upsert`, {
     method: "POST",
     body: JSON.stringify({
-      data: [{
-        caseId: testCase.caseId,
-        fileName: testCase.fileName,
-        subject: testCase.subject,
-        correlationKey: testCase.correlationKey,
-        pdfBase64: pdf.toString("base64"),
-        expectedAnswer: JSON.stringify(testCase.expected)
-      }],
-      returnType: "all"
+      filter: {
+        type: "and",
+        filters: [{ columnName: "caseId", condition: "eq", value: testCase.caseId }]
+      },
+      data,
+      returnData: true
     })
   });
 }
 
-const credentials = (await api("/credentials?limit=100")).data ?? [];
-let credential = credentials.find((entry) => entry.name === CREDENTIAL_NAME && entry.type === "openAiApi");
-if (!credential) {
-  credential = await api("/credentials", {
-    method: "POST",
-    body: JSON.stringify({
-      name: CREDENTIAL_NAME,
-      type: "openAiApi",
-      data: {
-        apiKey: process.env.DAIMENSION_API_KEY,
-        url: "https://llm-inference.daimension.ai/v1"
+const tableReference = {
+  __rl: true,
+  value: table.id,
+  mode: "list",
+  cachedResultName: TABLE_NAME,
+  ...(table.projectId ? { cachedResultUrl: `/projects/${table.projectId}/datatables/${table.id}` } : {})
+};
+if (!expectedOnly) {
+  for (const graph of [workflow, workflow.activeVersion].filter(Boolean)) {
+    for (const node of graph.nodes ?? []) {
+      if (["When fetching a dataset row", "Evaluation – Ergebnis speichern"].includes(node.name)) {
+        node.parameters.dataTableId = tableReference;
       }
-    })
-  });
+      if (node.name === "Evaluationsfall manuell laden") {
+        node.parameters.dataTableId = { __rl: true, value: table.id, mode: "id" };
+      }
+    }
+  }
+  writeFileSync(path.join(ROOT, "workflows/outlook-certificate-analysis.json"), `${JSON.stringify(workflow, null, 2)}\n`);
 }
 
 console.log(JSON.stringify({
   table: { id: table.id, name: table.name },
-  credential: { id: credential.id, name: credential.name, type: credential.type },
   caseCount: cases.length,
+  mode: expectedOnly ? "expected-only" : "full",
   evaluationConfig: {
     name: "Certificate OCR and Extraction – nine certificates",
     triggerNodeName: "When fetching a dataset row",
     outputNodeName: "Evaluation – Ergebnis speichern",
     metricsNodeName: "Evaluation – Metriken setzen",
-    model: "deepseek-v4-flash-3107"
+    scoring: "deterministic field comparison"
   }
 }, null, 2));

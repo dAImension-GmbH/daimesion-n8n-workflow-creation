@@ -14,20 +14,28 @@ const prepareName = "Evaluations-PDF vorbereiten";
 const evaluationGateName = "Evaluationslauf?";
 const manualResultName = "Evaluations-Ergebnis (manuell)";
 const evaluationTriggerName = "When fetching a dataset row";
-const judgePrepareName = "Evaluationsbewertung vorbereiten";
-const judgeRequestName = "Mit DeepSeek bewerten";
-const judgeParseName = "Evaluationsbewertung lesen";
+const deterministicEvaluationName = "Evaluation deterministisch bewerten";
 const setOutputsName = "Evaluation – Ergebnis speichern";
 const setMetricsName = "Evaluation – Metriken setzen";
 const productionPdfGateName = "Produktions-PDF für Dokumentenreview";
-const dataTableId = "o5kI3iiMHP9tRCoT";
+const existingEvaluationNode = workflow.nodes.find((node) =>
+  [evaluationTriggerName, setOutputsName].includes(node.name)
+  && node.parameters?.dataTableId?.value
+);
+const dataTableId = String(
+  process.env.CERTIFICATE_EVALUATION_TABLE_ID
+  ?? existingEvaluationNode?.parameters?.dataTableId?.value
+  ?? ""
+).trim();
+if (!dataTableId) {
+  throw new Error("No evaluation Data Table ID is configured. Run npm run setup:evaluations first or set CERTIFICATE_EVALUATION_TABLE_ID.");
+}
 const evaluationCaseId = String(process.env.EVALUATION_CASE_ID ?? "").trim();
 const dataTableReference = {
   __rl: true,
   value: dataTableId,
   mode: "list",
-  cachedResultName: "Certificate OCR and Extraction Evaluation",
-  cachedResultUrl: "/projects/rQWJLyrY2gAKELRh/datatables/o5kI3iiMHP9tRCoT"
+  cachedResultName: "Certificate OCR and Extraction Evaluation"
 };
 const prepareCode = `const input = $input.first().json ?? {};
 const source = input.row ?? input.data ?? input;
@@ -59,7 +67,7 @@ return [{
   },
   binary: { data: await this.helpers.prepareBinaryData(pdf, fileName, 'application/pdf') }
 }];`;
-const judgePrepareCode = `const actual = $('Ergebnis validieren und Dokumentenreview vorbereiten').first().json;
+const deterministicEvaluationCode = `const actual = $('Ergebnis validieren und Dokumentenreview vorbereiten').first().json;
 let evaluationRow = {};
 try { evaluationRow = $('When fetching a dataset row').first().json; } catch {}
 let prepared = {};
@@ -68,56 +76,132 @@ const expectedRaw = evaluationRow.expectedAnswer ?? prepared.expectedAnswer;
 if (!expectedRaw) throw new Error('The evaluation row has no expectedAnswer.');
 let expected = expectedRaw;
 if (typeof expectedRaw === 'string') {
-  try { expected = JSON.parse(expectedRaw); } catch { expected = expectedRaw; }
+  try { expected = JSON.parse(expectedRaw); } catch { throw new Error('expectedAnswer is not valid JSON.'); }
 }
 const actualAnswer = JSON.stringify(actual);
 const expectedAnswer = typeof expectedRaw === 'string' ? expectedRaw : JSON.stringify(expectedRaw);
-const system = [
-  'You are a strict evaluator for structured material-certificate extraction.',
-  'Compare the expected facts with the actual extraction JSON.',
-  'Judge only facts explicitly present in the expected answer. Ignore additional valid fields, timestamps, service metadata, array ordering, and formatting differences.',
-  'Score with an integer from 1 to 5: 5=all expected facts are present and correct; 4=only a minor non-material mismatch; 3=one significant expected fact is missing or wrong; 2=several expected facts are missing or wrong; 1=unusable extraction.',
-  'Return only one JSON object with keys score, reasoning, matchedFacts, missingOrWrongFacts.'
-].join(' ');
-return [{ json: {
-  actualAnswer,
-  expectedAnswer,
-  llmRequest: {
-    model: 'deepseek-v4-flash-3107',
-    temperature: 0,
-    max_tokens: 1800,
-    response_format: { type: 'json_object' },
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: '<EXPECTED_FACTS>\\n' + JSON.stringify(expected) + '\\n</EXPECTED_FACTS>\\n<ACTUAL_EXTRACTION>\\n' + actualAnswer + '\\n</ACTUAL_EXTRACTION>' }
-    ]
+const normalizeString = value => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '');
+const stringMatches = (actualValue, expectedValue) => {
+  const actualNormalized = normalizeString(actualValue);
+  const alternatives = String(expectedValue ?? '').split(/\\s+\\/\\s+/).map(normalizeString).filter(Boolean);
+  return Boolean(actualNormalized) && alternatives.some(value => actualNormalized === value || actualNormalized.includes(value) || value.includes(actualNormalized));
+};
+const productTokens = value => {
+  const aliases = { exzentrisch: 'eccentric', exzentrisches: 'eccentric', reduzierstuck: 'reducer', reduzierstueck: 'reducer', typ: 'type', rf: 'raisedface', raised: 'raisedface', face: '', zoll: 'inch', stuck: 'piece', stueck: 'piece', stick: 'piece' };
+  return String(value ?? '').normalize('NFKD').replace(/\\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\\s+/).map(token => aliases[token] ?? token).filter(Boolean);
+};
+const productMatches = (actualValue, expectedValue) => {
+  if (stringMatches(actualValue, expectedValue)) return true;
+  const actualTokens = new Set(productTokens(actualValue));
+  return String(expectedValue ?? '').split(/\\s+\\/\\s+/).some(alternative => {
+    const expectedTokens = productTokens(alternative);
+    return expectedTokens.length > 0 && expectedTokens.every(token => actualTokens.has(token));
+  });
+};
+const expectedNumber = value => Array.isArray(value) ? Math.min(...value.map(Number).filter(Number.isFinite)) : Number(value);
+const numberMatches = (actualValue, expectedValue) => {
+  const left = Number(actualValue);
+  const right = expectedNumber(expectedValue);
+  const tolerance = Math.max(0.01, Math.abs(right) * 0.0001);
+  return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= tolerance;
+};
+const chemicalNumberMatches = (actualValue, expectedValue) => {
+  const left = Number(actualValue);
+  const right = Number(expectedValue);
+  const tolerance = Math.max(0.000001, Math.abs(right) * 0.0001);
+  return Number.isFinite(left) && Number.isFinite(right) && left >= 0 && Math.abs(left - right) <= tolerance;
+};
+const dimensionsMatch = (actualValue, expectedValue) => normalizeString(actualValue) === normalizeString(expectedValue);
+const actualRows = Array.isArray(actual.results) ? actual.results : [];
+const expectedRows = Array.isArray(expected.positions) ? expected.positions : [];
+const matchedFacts = [];
+const missingOrWrongFacts = [];
+const matchedChemistryFacts = [];
+const missingOrWrongChemistryFacts = [];
+let checkedFacts = 0;
+let checkedChemistryFacts = 0;
+const record = (path, ok, detail) => {
+  checkedFacts++;
+  (ok ? matchedFacts : missingOrWrongFacts).push(ok ? path : path + ': ' + detail);
+};
+const recordChemistry = (path, ok, detail) => {
+  checkedChemistryFacts++;
+  (ok ? matchedChemistryFacts : missingOrWrongChemistryFacts).push(ok ? path : path + ': ' + detail);
+  record(path, ok, detail);
+};
+for (const [key, actualKey] of [['certificateNumber','certificateNumber'], ['customerOrderNumber','customerOrderNumber'], ['creditor','creditor']]) {
+  if (expected[key] === undefined) continue;
+  const values = actualRows.map(row => row[actualKey]);
+  record(key, values.some(value => stringMatches(value, expected[key])), 'expected ' + JSON.stringify(expected[key]) + ', got ' + JSON.stringify(values));
+}
+if (expected.rawMaterialCertificate !== undefined) {
+  const values = actualRows.map(row => row.rawMaterialCertificate);
+  record('rawMaterialCertificate', values.some(value => stringMatches(value, expected.rawMaterialCertificate)), 'expected ' + JSON.stringify(expected.rawMaterialCertificate) + ', got ' + JSON.stringify(values));
+}
+const unusedRows = new Set(actualRows.map((_, index) => index));
+for (let expectedIndex = 0; expectedIndex < expectedRows.length; expectedIndex++) {
+  const expectedRow = expectedRows[expectedIndex];
+  const candidates = [...unusedRows].filter(index => stringMatches(actualRows[index].heatNumber, expectedRow.heatNumber));
+  let rowIndex = candidates.find(index => expectedRow.dimensions === undefined || dimensionsMatch(actualRows[index].dimensions, expectedRow.dimensions));
+  if (rowIndex === undefined) rowIndex = candidates[0];
+  const prefix = 'positions[' + expectedIndex + ']';
+  if (rowIndex === undefined) {
+    record(prefix, false, 'no row for heat ' + expectedRow.heatNumber);
+    for (const [element, expectedValue] of Object.entries(expectedRow.chemicals ?? {})) {
+      recordChemistry(prefix + '.chemicals.' + element, false, 'no row for heat ' + expectedRow.heatNumber + '; expected ' + expectedValue);
+    }
+    continue;
   }
-} }];`;
-const judgeParseCode = `const response = $input.first().json;
-const source = $('Evaluationsbewertung vorbereiten').first().json;
-const raw = response.choices?.[0]?.message?.content ?? response.output_text ?? response.text ?? response;
-let parsed = raw;
-if (typeof raw === 'string') {
-  const text = raw.trim().replace(/^\`\`\`(?:json)?\\s*/i, '').replace(/\\s*\`\`\`$/, '');
-  try { parsed = JSON.parse(text); } catch {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start < 0 || end <= start) throw new Error('Evaluation judge returned no JSON object.');
-    parsed = JSON.parse(text.slice(start, end + 1));
+  unusedRows.delete(rowIndex);
+  const row = actualRows[rowIndex];
+  record(prefix + '.heatNumber', stringMatches(row.heatNumber, expectedRow.heatNumber), 'expected ' + expectedRow.heatNumber + ', got ' + row.heatNumber);
+  for (const field of ['quantity','yieldStrength02','yieldStrength10','tensileStrength','elongation']) {
+    if (expectedRow[field] === undefined) continue;
+    record(prefix + '.' + field, numberMatches(row[field], expectedRow[field]), 'expected ' + JSON.stringify(expectedRow[field]) + ', got ' + row[field]);
+  }
+  for (const field of ['product','dimensions']) {
+    if (expectedRow[field] === undefined) continue;
+    const ok = field === 'dimensions' ? dimensionsMatch(row[field], expectedRow[field]) : productMatches(row[field], expectedRow[field]);
+    record(prefix + '.' + field, ok, 'expected ' + JSON.stringify(expectedRow[field]) + ', got ' + JSON.stringify(row[field]));
+  }
+  if (expectedRow.material !== undefined) {
+    const materials = [row.werkstoff1,row.werkstoff2,row.werkstoff3,row.werkstoff4,row.werkstoff5].filter(value => value && value !== '-1').join(' / ');
+    record(prefix + '.material', stringMatches(materials, expectedRow.material), 'expected ' + JSON.stringify(expectedRow.material) + ', got ' + JSON.stringify(materials));
+  }
+  if (expectedRow.standards !== undefined) {
+    const norms = [row.norm1,row.norm2,row.norm3,row.norm4,row.norm5].filter(value => value && value !== '-1').join(' / ');
+    const standards = Array.isArray(expectedRow.standards) ? expectedRow.standards : [expectedRow.standards];
+    for (let standardIndex = 0; standardIndex < standards.length; standardIndex++) {
+      record(prefix + '.standards[' + standardIndex + ']', stringMatches(norms, standards[standardIndex]), 'expected ' + JSON.stringify(standards[standardIndex]) + ', got ' + JSON.stringify(norms));
+    }
+  }
+  const actualChemicals = row.chemicals && typeof row.chemicals === 'object' && !Array.isArray(row.chemicals) ? row.chemicals : {};
+  const actualChemicalEntries = Object.entries(actualChemicals);
+  for (const [element, expectedValue] of Object.entries(expectedRow.chemicals ?? {})) {
+    const actualEntry = actualChemicalEntries.find(([actualElement]) => String(actualElement).toUpperCase() === String(element).toUpperCase());
+    const actualValue = actualEntry?.[1];
+    recordChemistry(
+      prefix + '.chemicals.' + element,
+      chemicalNumberMatches(actualValue, expectedValue),
+      'expected ' + expectedValue + ', got ' + JSON.stringify(actualValue)
+    );
   }
 }
-const numericScore = Number(parsed?.score);
-if (!Number.isFinite(numericScore)) throw new Error('Evaluation judge returned no numeric score.');
-const score = Math.max(1, Math.min(5, Math.round(numericScore)));
-const reasoning = String(parsed?.reasoning ?? parsed?.reasoning_summary ?? '').trim() || 'No reasoning returned.';
-return [{ json: {
-  actualAnswer: source.actualAnswer,
-  expectedAnswer: source.expectedAnswer,
-  score,
-  passed: score >= 4 ? 1 : 0,
-  reasoning,
-  judge: parsed
-} }];`;
+if (checkedChemistryFacts === 0) {
+  recordChemistry('chemistryGroundTruth', false, 'no expected chemical measurements configured');
+}
+record('rowCount', actualRows.length === expectedRows.length, 'expected ' + expectedRows.length + ', got ' + actualRows.length);
+const correctness = checkedFacts ? matchedFacts.length / checkedFacts : 0;
+const chemistryScore = checkedChemistryFacts ? matchedChemistryFacts.length / checkedChemistryFacts : 0;
+const chemistryPassed = checkedChemistryFacts > 0 && missingOrWrongChemistryFacts.length === 0 ? 1 : 0;
+const baseScore = missingOrWrongFacts.length === 0 ? 5 : correctness >= 0.95 ? 4 : correctness >= 0.8 ? 3 : correctness >= 0.5 ? 2 : 1;
+const score = chemistryPassed ? baseScore : Math.min(baseScore, 3);
+const passed = missingOrWrongFacts.length === 0 && chemistryPassed === 1 ? 1 : 0;
+const reasoning = passed ? 'All ' + checkedFacts + ' expected facts matched deterministically.' : missingOrWrongFacts.join('; ');
+const chemistryReasoning = chemistryPassed
+  ? 'All ' + checkedChemistryFacts + ' expected chemical measurements matched their heat.'
+  : missingOrWrongChemistryFacts.join('; ');
+return [{ json: { actualAnswer, expectedAnswer, score, correctness, passed, reasoning, matchedFacts, missingOrWrongFacts, chemistryScore, chemistryPassed, chemistryReasoning, matchedChemistryFacts, missingOrWrongChemistryFacts } }];`;
 
 if (!workflow.nodes.some((node) => node.name === manualName)) {
   workflow.nodes.push({
@@ -136,7 +220,7 @@ const loaderDefinition = {
     operation: "get",
     dataTableId: {
       __rl: true,
-      value: "o5kI3iiMHP9tRCoT",
+      value: dataTableId,
       mode: "id"
     },
     matchType: "anyCondition",
@@ -194,55 +278,20 @@ const evaluationTriggerNode = workflow.nodes.find((node) => node.name === evalua
 if (evaluationTriggerNode) Object.assign(evaluationTriggerNode, evaluationTriggerDefinition);
 else workflow.nodes.push(evaluationTriggerDefinition);
 
-const judgePrepareDefinition = {
-  parameters: { jsCode: judgePrepareCode },
+const deterministicEvaluationDefinition = {
+  parameters: { jsCode: deterministicEvaluationCode },
   id: "3427a101-4da5-43e7-b0b8-2010bdf3d282",
-  name: judgePrepareName,
+  name: deterministicEvaluationName,
   type: "n8n-nodes-base.code",
   typeVersion: 2,
   position: [4160, 272]
 };
-const judgePrepareNode = workflow.nodes.find((node) => node.name === judgePrepareName);
-if (judgePrepareNode) Object.assign(judgePrepareNode, judgePrepareDefinition);
-else workflow.nodes.push(judgePrepareDefinition);
-
-const judgeRequestDefinition = {
-  parameters: {
-    method: "POST",
-    url: "https://llm-inference.daimension.ai/v1/chat/completions",
-    authentication: "genericCredentialType",
-    genericAuthType: "httpBearerAuth",
-    sendHeaders: true,
-    headerParameters: { parameters: [{ name: "Content-Type", value: "application/json" }] },
-    sendBody: true,
-    specifyBody: "json",
-    jsonBody: "={{ $json.llmRequest }}",
-    options: { timeout: 300000 }
-  },
-  id: "bb183a87-4072-44de-94bb-57695bc1e2ce",
-  name: judgeRequestName,
-  type: "n8n-nodes-base.httpRequest",
-  typeVersion: 4.2,
-  position: [4416, 272],
-  credentials: {
-    httpBearerAuth: { id: "pAOBlEBSCcHS5Do1", name: "Daimension LLM Bearer Auth" }
-  }
-};
-const judgeRequestNode = workflow.nodes.find((node) => node.name === judgeRequestName);
-if (judgeRequestNode) Object.assign(judgeRequestNode, judgeRequestDefinition);
-else workflow.nodes.push(judgeRequestDefinition);
-
-const judgeParseDefinition = {
-  parameters: { jsCode: judgeParseCode },
-  id: "26da2516-7051-42a6-ac2d-0d1eae105f1b",
-  name: judgeParseName,
-  type: "n8n-nodes-base.code",
-  typeVersion: 2,
-  position: [4672, 272]
-};
-const judgeParseNode = workflow.nodes.find((node) => node.name === judgeParseName);
-if (judgeParseNode) Object.assign(judgeParseNode, judgeParseDefinition);
-else workflow.nodes.push(judgeParseDefinition);
+const deterministicEvaluationNode = workflow.nodes.find((node) =>
+  [deterministicEvaluationName, "Evaluationsbewertung vorbereiten"].includes(node.name)
+);
+if (deterministicEvaluationNode) Object.assign(deterministicEvaluationNode, deterministicEvaluationDefinition);
+else workflow.nodes.push(deterministicEvaluationDefinition);
+workflow.nodes = workflow.nodes.filter((node) => !["Mit DeepSeek bewerten", "Evaluationsbewertung lesen"].includes(node.name));
 
 const existingOutputsNode = workflow.nodes.find((node) => node.name === setOutputsName)
   ?? workflow.nodes.find((node) => node.name === "Evaluation" && node.type === "n8n-nodes-base.evaluation");
@@ -255,6 +304,9 @@ const setOutputsDefinition = {
       { outputName: "actualAnswer", outputValue: "={{ $json.actualAnswer }}" },
       { outputName: "judgeScore", outputValue: "={{ $json.score }}" },
       { outputName: "judgeReasoning", outputValue: "={{ $json.reasoning }}" },
+      { outputName: "chemistryScore", outputValue: "={{ $json.chemistryScore }}" },
+      { outputName: "chemistryReasoning", outputValue: "={{ $json.chemistryReasoning }}" },
+      { outputName: "chemistryPassed", outputValue: "={{ $json.chemistryPassed }}" },
       { outputName: "passed", outputValue: "={{ $json.passed }}" }
     ] }
   },
@@ -272,7 +324,9 @@ const setMetricsDefinition = {
     operation: "setMetrics",
     metric: "customMetrics",
     metrics: { assignments: [
-      { id: "2e1b70c2-45c4-4f06-8985-3ef7b1ff3df4", name: "correctness", value: "={{ $json.score }}", type: "number" },
+      { id: "2e1b70c2-45c4-4f06-8985-3ef7b1ff3df4", name: "correctness", value: "={{ $json.correctness }}", type: "number" },
+      { id: "cb591335-2bbc-4ac4-9d55-d6d27ed2ff6c", name: "Chemistry score", value: "={{ $json.chemistryScore }}", type: "number" },
+      { id: "ffae4488-3f4a-4074-b2f8-da805ae09582", name: "Chemistry pass rate", value: "={{ $json.chemistryPassed }}", type: "number" },
       { id: "ef05dbf9-b4ec-4d11-9215-cb19e12bafc4", name: "Pass rate", value: "={{ $json.passed }}", type: "number" }
     ] }
   },
@@ -360,17 +414,18 @@ workflow.connections["Ergebnis validieren und Dokumentenreview vorbereiten"] = {
 };
 workflow.connections[evaluationGateName] = {
   main: [
-    [{ node: judgePrepareName, type: "main", index: 0 }],
+    [{ node: deterministicEvaluationName, type: "main", index: 0 }],
     [{ node: "Original-PDF und Analyse zusammenführen", type: "main", index: 1 }]
   ]
 };
-workflow.connections[judgePrepareName] = { main: [[{ node: judgeRequestName, type: "main", index: 0 }]] };
-workflow.connections[judgeRequestName] = { main: [[{ node: judgeParseName, type: "main", index: 0 }]] };
-workflow.connections[judgeParseName] = { main: [[{ node: setOutputsName, type: "main", index: 0 }]] };
+workflow.connections[deterministicEvaluationName] = { main: [[{ node: setOutputsName, type: "main", index: 0 }]] };
 workflow.connections[setOutputsName] = { main: [[{ node: setMetricsName, type: "main", index: 0 }]] };
 workflow.connections[setMetricsName] = { main: [[{ node: manualResultName, type: "main", index: 0 }]] };
 workflow.connections[manualResultName] = { main: [[]] };
 delete workflow.connections.Evaluation;
+delete workflow.connections["Evaluationsbewertung vorbereiten"];
+delete workflow.connections["Mit DeepSeek bewerten"];
+delete workflow.connections["Evaluationsbewertung lesen"];
 
 const storage = workflow.nodes.find((node) => node.name === "Zertifikat zwischenspeichern");
 storage.parameters.jsCode = storage.parameters.jsCode.replace(
@@ -387,9 +442,130 @@ mineruReply.parameters.jsCode = mineruReply.parameters.jsCode.replace(
 const evidenceLoop = workflow.nodes.find((node) => node.name === "DeepSeek-Belegblöcke nacheinander");
 if (evidenceLoop) evidenceLoop.parameters.batchSize = 1;
 
+const deckCertificateRule = "Reine ISO-/TÜV-/DVGW-, Zulassungs- und QM-Zertifikate ohne positionsbezogene Schmelze sind Referenzanlagen und niemals das Deckzeugnis. certificateNumber muss das Prüf-/Werkstoffzeugnis identifizieren, das unmittelbar zu Produktposition und Schmelze gehört; Zulassungsnummern dürfen es nicht ersetzen. Zweisprachig wiederholte Positionen zählen genau einmal.";
+const coverCertificateRule = "Bei zusammengesetzten PDFs ist das früheste Abnahmeprüfzeugnis, das Kundenbestellung, Fertigprodukt, Stückzahl und Fertigmaße gemeinsam nennt, das Deckzeugnis; reine Titel- oder Indexseiten ausgenommen. Spätere Herstellerzeugnisse mit Rohmaterialabmessungen und schmelzenspezifischen Prüfwerten sind Vormaterialanlagen: Ihre Nummer, Menge und Produktbezeichnung dürfen certificateNumber, quantity und product des Deckzeugnisses niemals ersetzen.";
+const legacyMechanicalRule = "Mechanische Istwerte niemals runden: Bei mehreren Messungen derselben Schmelze und Prüftemperatur jeden Originalwert vergleichen und den exakt kleinsten belegten Wert übernehmen.";
+const exactMechanicalRule = "Mechanische Istwerte niemals runden oder über getrennte Probenlagen hinweg minimieren. Wähle den primären Abnahme-/Lieferzustandsblock, der Produktposition, Probenlage und ausgewiesenen Prüfanforderungen zugeordnet ist; nachfolgende Zusatzproben anderer Lage dürfen ihn nicht ersetzen. Nur innerhalb desselben vergleichbaren Prüfblocks gilt die dort verlangte Auswahlregel.";
+const offsetYieldRule = "Enthält der gewählte vergleichbare Prüfblock ausdrücklich Rp1.0, Rp1,0 oder einen 1-%-Offset-Istwert, muss yieldStrength10 den kleinsten dieser belegten Istwerte enthalten und darf nicht -1 sein. Anforderungs-/Grenzwerte ohne Istmessung sind weiterhin keine Messwerte.";
+const evidenceTraceRule = "Erhalte für jeden Zugversuch comparableGroupId, testBlockId, specimenId, specimenLocation, gaugeLengthType, temperatureC, die wörtlichen Spaltenüberschriften und sourceQuote. gaugeLengthType ist genau A5, 5D, A4, 2IN, OTHER oder UNKNOWN. Ein Rp1.0-Wert darf nur in yieldStrength10 stehen, wenn yieldStrength10Explicit=true und die zitierte Überschrift ausdrücklich Rp1.0, Rp1,0 oder 1 % nennt.";
+const stackedMechanicalRowsRule = "Mehrzeilige Tabellenzellen sind mehrere Prüfzeilen: Stehen unter einer gemeinsamen Proben-Nr. beispielsweise 284/317 und darunter 271/306, erzeuge zwei Tests desselben comparableGroupId und erhalte beide Rp0.2/Rp1.0-Paare. Dasselbe gilt für parallel gestapelte Rm- und Dehnungswerte. Wenn der vollständige Tabellenkopf zwei Dehngrenzenspalten als 0,2 % und 1,0 % kennzeichnet, ist die zweite Spalte ein ausdrücklicher Rp1.0-Beleg, auch wenn MinerU die Überschrift von den Zahlenzeilen getrennt hat.";
+const pairedMechanicalColumnsRule = "Bei parallel angeordneten Mechanikspalten niemals Spalten als neue Proben ausgeben. Beispiel: Rm=[608.63,613.85], Rp0.2=[279.26,327.21], Rp1.0=[301.87,358.29] sind genau zwei Probenzeilen: 608.63/279.26/301.87 und 613.85/327.21/358.29. Enthält jede Probenzeile zwei Dehnungen, kennzeichne die A5/5D-/proportionale bzw. erste primäre Dehnung mit isPreferredElongationColumn=true und die 2IN-/sekundäre Dehnung mit false; nur die bevorzugte Dehnung liefert elongation.";
+const acceptanceBlockRule = "isPrimaryAcceptanceBlock=true nur für den durch dieselbe Anforderungszeile (Min./Max./Requirements/Anforderungen) und Probenlage bezeichneten Abnahmeblock. Eine nachfolgende Zusatzmessung ohne diese Anforderungszeile bleibt false, auch wenn Schmelze, testBlockId oder comparableGroupId gleich aussehen. comparableGroupId gilt nur innerhalb desselben sourceBlock und darf niemals über verschiedene Anlagen hinweg zusammengeführt werden.";
+const deterministicMechanicalRule = "Fülle mechanicalSelection vollständig vor den vier Mechanik-Skalaren: selectedComparableGroupId, gaugeLengthType, selectionReason und alle Tests des ausgewählten vergleichbaren Blocks. 5D gilt als A5 und hat Vorrang vor 2IN; A5/5D hat Vorrang vor A4. Innerhalb dieses einen Blocks wird das feldweise Minimum gebildet; die vier Endwerte dürfen absichtlich aus verschiedenen Probenzeilen stammen. Niemals eine komplette erste Tabellenzeile nur deshalb übernehmen, weil sie zusammenhängend ist.";
+const deckTraceRule = "Fülle deckSelection mit documentRole=DECK, sourceBlockIndex, sourcePage, selectionReason und den wörtlich belegten Deckfeldern. Die Kundenbestellung dient nur zur Auswahl des Deckzeugnisses: Wähle den frühesten Beleg, der dieselbe Kundenbestellung sowie Fertigprodukt, Stückzahl und Fertigmaße nennt. Rohmaterial-, Rohr-, Zulassungs- oder QM-Anlagen dürfen diese Felder nicht liefern.";
+const headerLabelRule = "Ordne Kopfwerte ausschließlich nach ihrem Etikett zu: Inspection Certificate No./Abnahmeprüfzeugnis-Nr. ist certificateNumber; Bestell-Nr./Customer Order/P.O. ist customerOrderNumber. Auftrags-Nr./Works Order, Supplier Order, PU- und AB-Vorgangsnummern sind keine Kundenbestellung und keine Zeugnisnummer, sofern sie nicht ausdrücklich genau so beschriftet sind.";
+const legacyMaterialStandardRule = "Werkstoffspezifikationen, die in der Material-/B02-Zeile stehen, bleiben zusätzlich eigenständige Normen und stehen vor allgemeinen Prüfanforderungen. Beispiel: 'F316/F316L - ASTM A 182M-24 / ASME SA-182M-23' ergibt werkstoff=F316/F316L sowie norm1=ASTM A182M-24 und norm2=ASME SA-182M-23.";
+const materialStandardRule = "Werkstoffspezifikationen, die in der Material-/B02-Zeile stehen, bleiben zusätzlich eigenständige Normen und stehen vor allgemeinen Prüfanforderungen. Beispiel: F316/F316L - ASTM A 182M-24 / ASME SA-182M-23 ergibt werkstoff=F316/F316L sowie norm1=ASTM A182M-24 und norm2=ASME SA-182M-23.";
+const removePromptRule = (node, rule) => {
+  if (!node) return;
+  node.parameters.jsCode = node.parameters.jsCode.replace("  '" + rule + "',\n", "");
+};
+const appendPromptRule = (node, anchor, rule) => {
+  if (!node || node.parameters.jsCode.includes(rule)) return;
+  node.parameters.jsCode = node.parameters.jsCode.replace(anchor, anchor + "\n  '" + rule + "',");
+};
+for (const nodeName of ["Zeugnis in Belegblöcke teilen", "Belege sammeln und Normalisierung bauen", "Qualitätsprüfung vorbereiten"]) {
+  const promptNode = workflow.nodes.find((node) => node.name === nodeName);
+  removePromptRule(promptNode, legacyMechanicalRule);
+  if (promptNode) promptNode.parameters.jsCode = promptNode.parameters.jsCode.replaceAll(legacyMaterialStandardRule, materialStandardRule);
+}
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  'Deckzeugnisfelder haben Vorrang für Zertifikats-/Reportnummer, Kundenbestellung, Menge, Produkt, Abmessung, Werkstoff und ausstellenden Hersteller. Angefügte Vormaterialzeugnisse liefern die schmelzenspezifische Chemie und Mechanik; ihre Auftrags-, Zertifikats-, Mengen- und Abmessungswerte ersetzen die Deckzeugnisfelder nicht.',",
+  deckCertificateRule,
+);
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  '" + deckCertificateRule + "',",
+  coverCertificateRule,
+);
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  'Zugversuche: Messwerte bei Raumtemperatur bevorzugen; 20 °C und 23 °C gelten als Raumtemperatur. Min.-/Max.-Anforderungen sind keine Messwerte. A5 und A4 getrennt belegen und nicht miteinander vermischen.',",
+  exactMechanicalRule,
+);
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  '" + exactMechanicalRule + "',",
+  offsetYieldRule,
+);
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  '" + offsetYieldRule + "',",
+  evidenceTraceRule,
+);
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  '" + evidenceTraceRule + "',",
+  stackedMechanicalRowsRule,
+);
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  '" + stackedMechanicalRowsRule + "',",
+  pairedMechanicalColumnsRule,
+);
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  '" + pairedMechanicalColumnsRule + "',",
+  acceptanceBlockRule,
+);
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  '" + coverCertificateRule + "',",
+  headerLabelRule,
+);
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  '" + headerLabelRule + "',",
+  materialStandardRule,
+);
+
+const evidencePreparation = workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen");
+if (evidencePreparation) {
+  evidencePreparation.parameters.jsCode = evidencePreparation.parameters.jsCode
+    .replace(
+      "  certificate: {\n    certificateNumber:",
+      "  certificate: {\n    documentRole: { value: 'DECK|RAW_MATERIAL|APPROVAL|OTHER|UNKNOWN', sourceQuote: 'string|null' },\n    sourcePage: { value: 'string|number|null', sourceQuote: 'string|null' },\n    deckIndicators: { customerOrder: 'boolean', finishedProduct: 'boolean', finishedQuantity: 'boolean', finishedDimensions: 'boolean' },\n    certificateNumber:"
+    )
+    .replace(
+      "    tensileTests: [{ temperatureC: 'number|null', yieldStrength02: 'number|null', yieldStrength10: 'number|null', tensileStrength: 'number|null', elongationA5: 'number|null', elongationA4: 'number|null', sourceQuote: 'string' }]",
+      "    tensileTests: [{ comparableGroupId: 'string', testBlockId: 'string', specimenId: 'string|null', specimenLocation: 'string|null', gaugeLengthType: 'A5|5D|A4|2IN|OTHER|UNKNOWN', elongationColumnType: 'A5|5D|A4|2IN|FS|PRIMARY|SECONDARY|UNKNOWN', isPreferredElongationColumn: 'boolean', temperatureC: 'number|null', columnHeaders: 'string', yieldStrength02: 'number|null', yieldStrength10: 'number|null', yieldStrength10Explicit: 'boolean', tensileStrength: 'number|null', elongation: 'number|null', elongationA5: 'number|null', elongationA4: 'number|null', isPrimaryAcceptanceBlock: 'boolean', sourcePage: 'string|number|null', sourceQuote: 'string' }]"
+    );
+}
+
 const pdfUploadPreparation = workflow.nodes.find((node) => node.name === "PDF-Upload vorbereiten");
 if (pdfUploadPreparation) {
+  if (!pdfUploadPreparation.parameters.jsCode.includes("function normalizeLandscapeScanRotation")) {
+    pdfUploadPreparation.parameters.jsCode = pdfUploadPreparation.parameters.jsCode.replace(
+      "const item = $input.first();",
+      "function normalizeLandscapeScanRotation(input) {\n  const source = Buffer.from(input).toString('latin1');\n  const rotate270Count = (source.match(/\\/Rotate\\s+270\\b/g) ?? []).length;\n  const landscapeA4Count = (source.match(/\\/MediaBox\\s*\\[\\s*0(?:\\.0+)?\\s+0(?:\\.0+)?\\s+84[01](?:\\.\\d+)?\\s+59[45](?:\\.\\d+)?\\s*\\]/g) ?? []).length;\n  const largeImageDimensions = [...source.matchAll(/\\/Width\\s+(\\d+)[\\s\\S]{0,160}?\\/Height\\s+(\\d+)/g)].map((match) => ({ width: Number(match[1]), height: Number(match[2]) })).filter(({ width, height }) => width >= 1000 && height >= 1000);\n  const hasPortraitScannerPage = largeImageDimensions.some(({ width, height }) => height > width);\n  if (!rotate270Count || landscapeA4Count < rotate270Count || hasPortraitScannerPage) return { buffer: Buffer.from(input), applied: false, pageCount: 0 };\n  const corrected = source.replace(/\\/Rotate(\\s+)270\\b/g, (_, spacing) => '/Rotate' + spacing + '180');\n  return { buffer: Buffer.from(corrected, 'latin1'), applied: true, pageCount: rotate270Count };\n}\n\nconst item = $input.first();"
+    );
+  }
+  pdfUploadPreparation.parameters.jsCode = pdfUploadPreparation.parameters.jsCode.replace(
+    "const landscapeA4Count = (source.match(/\\/MediaBox\\s*\\[\\s*0(?:\\.0+)?\\s+0(?:\\.0+)?\\s+84[01](?:\\.\\d+)?\\s+59[45](?:\\.\\d+)?\\s*\\]/g) ?? []).length;\n  if (!rotate270Count || landscapeA4Count < rotate270Count)",
+    "const landscapeA4Count = (source.match(/\\/MediaBox\\s*\\[\\s*0(?:\\.0+)?\\s+0(?:\\.0+)?\\s+84[01](?:\\.\\d+)?\\s+59[45](?:\\.\\d+)?\\s*\\]/g) ?? []).length;\n  const largeImageDimensions = [...source.matchAll(/\\/Width\\s+(\\d+)[\\s\\S]{0,160}?\\/Height\\s+(\\d+)/g)].map((match) => ({ width: Number(match[1]), height: Number(match[2]) })).filter(({ width, height }) => width >= 1000 && height >= 1000);\n  const hasPortraitScannerPage = largeImageDimensions.some(({ width, height }) => height > width);\n  if (!rotate270Count || landscapeA4Count < rotate270Count || hasPortraitScannerPage)"
+  );
   pdfUploadPreparation.parameters.jsCode = pdfUploadPreparation.parameters.jsCode
+    .replace(
+      "const trailerStart = Math.max(0, pdfBuffer.length - 65536);\nconst trailer = pdfBuffer.subarray(trailerStart).toString('latin1');",
+      "const rotationNormalization = normalizeLandscapeScanRotation(pdfBuffer);\nconst uploadSourceBuffer = rotationNormalization.buffer;\nconst trailerStart = Math.max(0, uploadSourceBuffer.length - 65536);\nconst trailer = uploadSourceBuffer.subarray(trailerStart).toString('latin1');"
+    )
+    .replace(
+      "const xrefProbe = pdfBuffer.subarray(xrefOffset, Math.min(pdfBuffer.length, xrefOffset + 4096)).toString('latin1');",
+      "const xrefProbe = uploadSourceBuffer.subarray(xrefOffset, Math.min(uploadSourceBuffer.length, xrefOffset + 4096)).toString('latin1');"
+    )
+    .replace(
+      "uploadPdfBuffer = await normalizePdf(pdfBuffer);",
+      "uploadPdfBuffer = await normalizePdf(uploadSourceBuffer);"
+    )
+    .replaceAll(
+      "uploadPdfBuffer = Buffer.from(pdfBuffer);",
+      "uploadPdfBuffer = Buffer.from(uploadSourceBuffer);"
+    )
+    .replace(
+      "pdfNormalization: needsStructuralRewrite ? (pdfNormalizationError ? 'rewrite-failed-fallback-original' : 'object-streams-to-classic-xref') : 'not-required',\n      pdfNormalizationError",
+      "pdfNormalization: needsStructuralRewrite ? (pdfNormalizationError ? 'rewrite-failed-fallback-original' : 'object-streams-to-classic-xref') : 'not-required',\n      pdfNormalizationError,\n      rotationNormalization: rotationNormalization.applied ? 'landscape-scan-270-to-180' : 'not-required',\n      rotationNormalizedPages: rotationNormalization.pageCount"
+    )
     .replace(
       "const uploadPdfBuffer = needsStructuralRewrite\n  ? await normalizePdf(pdfBuffer)\n  : Buffer.from(pdfBuffer);",
       "let pdfNormalizationError = null;\nlet uploadPdfBuffer;\nif (needsStructuralRewrite) {\n  try {\n    uploadPdfBuffer = await normalizePdf(pdfBuffer);\n  } catch (error) {\n    pdfNormalizationError = String(error?.message ?? error);\n    uploadPdfBuffer = Buffer.from(pdfBuffer);\n  }\n} else {\n  uploadPdfBuffer = Buffer.from(pdfBuffer);\n}"
@@ -399,10 +575,445 @@ if (pdfUploadPreparation) {
       "pdfNormalization: needsStructuralRewrite ? (pdfNormalizationError ? 'rewrite-failed-fallback-original' : 'object-streams-to-classic-xref') : 'not-required',\n      pdfNormalizationError"
     )
     .replace(
-      "pdfNormalizationApplied: needsStructuralRewrite",
+      /pdfNormalizationApplied: needsStructuralRewrite(?: && !pdfNormalizationError)+/,
       "pdfNormalizationApplied: needsStructuralRewrite && !pdfNormalizationError"
     );
 }
+
+const finalValidation = workflow.nodes.find((node) => node.name === "Ergebnis validieren und Dokumentenreview vorbereiten");
+if (finalValidation) {
+  const deterministicCorrectionCode = String.raw`const evidenceValue = (value) => value && typeof value === 'object' && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, 'value') ? value.value : value;
+const canonicalEvidence = (value) => String(evidenceValue(value) ?? '').normalize('NFKD').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+const evidenceNumber = (value) => { const raw = evidenceValue(value); if (raw === null || raw === undefined || String(raw).trim() === '') return null; const number = Number(String(raw).trim().replace(',', '.')); return Number.isFinite(number) && number >= 0 ? number : null; };
+const gaugeType = (test) => {
+  const source = [test.gaugeLengthType, test.gaugeLength, test.elongationType, test.elongationColumnType, test.columnHeaders, test.sourceQuote].map(evidenceValue).join(' ').toUpperCase().replace(/\s+/g, ' ');
+  if (/\b(?:A5|5D)\b|L0\s*=\s*5\s*D/.test(source)) return 'A5';
+  if (/\b(?:A4|4D)\b|L0\s*=\s*4\s*D/.test(source)) return 'A4';
+  if (/\b2\s*(?:IN|INCH|ZOLL)\b|2[\"″]|50(?:[.,]8)?\s*MM/.test(source)) return '2IN';
+  return 'UNKNOWN';
+};
+const fieldMinimum = (tests, field) => {
+  const values = tests.map((test) => evidenceNumber(test[field])).filter((value) => value !== null && value > 0);
+  return values.length ? Math.min(...values) : null;
+};
+const repairCollapsedPairedTests = (inputTests) => {
+  const byQuote = new Map();
+  for (const test of inputTests) {
+    const quote = String(evidenceValue(test.sourceQuote) ?? '').trim();
+    if (!quote) continue;
+    if (!byQuote.has(quote)) byQuote.set(quote, []);
+    byQuote.get(quote).push(test);
+  }
+  const consumed = new Set();
+  const repaired = [];
+  for (const [quote, quoteTests] of byQuote) {
+    if (quoteTests.length !== 4 || !quote.includes('|') || !quote.includes('/')) continue;
+    if (quoteTests.some((test) => evidenceNumber(test.yieldStrength10) !== null)) continue;
+    const tensileOrder = [];
+    for (const test of quoteTests) {
+      const tensile = evidenceNumber(test.tensileStrength);
+      if (tensile !== null && !tensileOrder.includes(tensile)) tensileOrder.push(tensile);
+    }
+    if (tensileOrder.length !== 2 || tensileOrder.some((tensile) => quoteTests.filter((test) => evidenceNumber(test.tensileStrength) === tensile).length !== 2)) continue;
+    const yieldPairs = tensileOrder.map((tensile) => quoteTests.filter((test) => evidenceNumber(test.tensileStrength) === tensile).map((test) => evidenceNumber(test.yieldStrength02)).filter((value) => value !== null).sort((left, right) => left - right));
+    const elongations = quoteTests.map((test) => evidenceNumber(test.elongation ?? test.elongationA5 ?? test.elongationA4));
+    if (yieldPairs.some((pair) => pair.length !== 2 || pair[1] <= pair[0]) || elongations.some((value) => value === null)) continue;
+    const template = quoteTests[0];
+    for (let index = 0; index < tensileOrder.length; index++) {
+      repaired.push({
+        ...template,
+        comparableGroupId: 'PAIRED-' + canonicalEvidence(quote).slice(0, 24),
+        testBlockId: 'PAIRED-COLUMNS',
+        specimenId: String(index + 1),
+        tensileStrength: tensileOrder[index],
+        yieldStrength02: yieldPairs[index][0],
+        yieldStrength10: yieldPairs[index][1],
+        yieldStrength10Explicit: true,
+        elongation: elongations[index * 2],
+        isPreferredElongationColumn: true,
+      });
+    }
+    quoteTests.forEach((test) => consumed.add(test));
+  }
+  return inputTests.filter((test) => !consumed.has(test)).concat(repaired);
+};
+const correctCertificateRow = (sourceRow) => {
+  const row = { ...sourceRow };
+  const heatKey = canonicalEvidence(row.heatNumber);
+  const expectedPoKey = canonicalEvidence(context.orderData?.poNumber);
+  const chunks = Array.isArray(context.evidence?.chunks) ? context.evidence.chunks : [];
+  const deckCandidates = [];
+  if (row.deckSelection && typeof row.deckSelection === 'object') {
+    deckCandidates.push({ ...row.deckSelection, sourceBlockIndex: evidenceNumber(row.deckSelection.sourceBlockIndex) ?? -1 });
+  }
+  for (const [chunkIndex, chunk] of chunks.entries()) {
+    const certificate = chunk?.certificate;
+    if (!certificate || typeof certificate !== 'object') continue;
+    const matchingHeat = (Array.isArray(chunk.heats) ? chunk.heats : []).find((heat) => canonicalEvidence(heat?.heatNumber) === heatKey);
+    deckCandidates.push({
+      documentRole: evidenceValue(certificate.documentRole),
+      sourceBlockIndex: evidenceNumber(chunk?.sourceBlock?.index) ?? chunkIndex + 1,
+      sourcePage: evidenceValue(certificate.sourcePage),
+      deckIndicators: certificate.deckIndicators,
+      certificateNumber: evidenceValue(certificate.certificateNumber),
+      customerOrderNumber: evidenceValue(certificate.customerOrderNumber),
+      manufacturer: evidenceValue(certificate.manufacturer),
+      product: evidenceValue(certificate.product),
+      dimensions: evidenceValue(certificate.dimensions),
+      material: evidenceValue(Array.isArray(certificate.materials) ? certificate.materials[0] : null),
+      quantity: evidenceValue(matchingHeat?.quantity),
+    });
+  }
+  const usableDecks = deckCandidates.filter((candidate) => {
+    const role = canonicalEvidence(candidate.documentRole);
+    const poMatches = expectedPoKey && canonicalEvidence(candidate.customerOrderNumber) === expectedPoKey;
+    return poMatches && !['RAWMATERIAL', 'APPROVAL', 'QM'].includes(role) && canonicalEvidence(candidate.certificateNumber);
+  });
+  usableDecks.sort((left, right) => {
+    const roleScore = (candidate) => canonicalEvidence(candidate.documentRole) === 'DECK' ? 100 : 0;
+    const indicators = (candidate) => Object.values(candidate.deckIndicators ?? {}).filter(Boolean).length;
+    return roleScore(right) - roleScore(left) || indicators(right) - indicators(left) || Number(left.sourceBlockIndex ?? 9999) - Number(right.sourceBlockIndex ?? 9999);
+  });
+  const deck = usableDecks[0];
+  if (deck) {
+    const assignString = (target, source) => { const value = String(evidenceValue(source) ?? '').trim(); if (value && value !== '-1') row[target] = value; };
+    assignString('certificateNumber', deck.certificateNumber);
+    assignString('customerOrderNumber', deck.customerOrderNumber);
+    assignString('creditor', deck.manufacturer);
+    assignString('product', deck.product);
+    assignString('dimensions', deck.dimensions);
+    assignString('werkstoff1', deck.material);
+    const deckQuantity = evidenceNumber(deck.quantity);
+    if (deckQuantity !== null && deckQuantity > 0) row.quantity = deckQuantity;
+  }
+
+  const criticalSource = String(context.criticalSource ?? '');
+  const criticalHeader = criticalSource.slice(0, 16000);
+  const expectedPo = String(context.orderData?.poNumber ?? '').trim();
+  if (expectedPo && canonicalEvidence(criticalSource).includes(canonicalEvidence(expectedPo))) {
+    row.customerOrderNumber = expectedPo;
+  }
+  const certificateMatches = [...criticalHeader.matchAll(/\b(?:NO|NR|N°)\s*[:.]?\s*([A-Z]{1,8}-[A-Z0-9][A-Z0-9./-]{3,})/gi)]
+    .map((match) => match[1])
+    .filter((value) => !/^(?:PO|PU|AB)-/i.test(value));
+  if (certificateMatches.length && /^(?:PO|PU|AB)-/i.test(String(row.certificateNumber ?? ''))) {
+    row.certificateNumber = certificateMatches[0];
+  }
+  const materialStandardSource = [row.werkstoff1, criticalHeader].join(' ');
+  const materialStandards = [];
+  for (const match of materialStandardSource.matchAll(/\b(ASTM|ASME)\s+(SA|A)\s*[- ]?\s*(\d{3,4})M?\s*[-–:]\s*(\d{2,4})\b/gi)) {
+    const organization = match[1].toUpperCase();
+    const prefix = match[2].toUpperCase();
+    const normalized = organization + ' ' + (prefix === 'SA' ? 'SA-' : 'A') + match[3] + 'M-' + match[4];
+    if (!materialStandards.some((value) => canonicalEvidence(value) === canonicalEvidence(normalized))) materialStandards.push(normalized);
+  }
+  if (materialStandards.length) {
+    const existingNorms = [row.norm1, row.norm2, row.norm3, row.norm4, row.norm5]
+      .map((value) => String(value ?? '').trim())
+      .filter((value) => value && value !== '-1' && !materialStandards.some((standard) => canonicalEvidence(value).includes(canonicalEvidence(standard))));
+    const mergedNorms = materialStandards.concat(existingNorms).slice(0, 5);
+    for (let index = 0; index < 5; index++) row['norm' + (index + 1)] = mergedNorms[index] ?? '-1';
+  }
+
+  const modelTests = Array.isArray(row.mechanicalSelection?.tests) ? row.mechanicalSelection.tests : [];
+  const evidenceTests = chunks.flatMap((chunk, chunkIndex) => (Array.isArray(chunk?.heats) ? chunk.heats : [])
+    .filter((heat) => canonicalEvidence(heat?.heatNumber) === heatKey)
+    .flatMap((heat) => (Array.isArray(heat.tensileTests) ? heat.tensileTests : []).map((test) => ({ ...test, _chunkIndex: chunkIndex }))));
+  let tests = repairCollapsedPairedTests(evidenceTests.length ? evidenceTests : modelTests);
+  const deduplicatedTests = [];
+  const seenTests = new Set();
+  for (const test of tests) {
+    const key = JSON.stringify([
+      canonicalEvidence(test.comparableGroupId ?? test.testBlockId), canonicalEvidence(test.specimenId), gaugeType(test),
+      evidenceNumber(test.temperatureC), evidenceNumber(test.yieldStrength02), evidenceNumber(test.yieldStrength10),
+      evidenceNumber(test.tensileStrength), evidenceNumber(test.elongation ?? test.elongationA5 ?? test.elongationA4), canonicalEvidence(test.sourceQuote),
+    ]);
+    if (!seenTests.has(key)) { seenTests.add(key); deduplicatedTests.push(test); }
+  }
+  tests = deduplicatedTests;
+  const gaugePriority = { A5: 3, A4: 2, '2IN': 1, UNKNOWN: 0 };
+  const bestGaugePriority = tests.reduce((best, test) => Math.max(best, gaugePriority[gaugeType(test)] ?? 0), -1);
+  if (bestGaugePriority > 0) tests = tests.filter((test) => (gaugePriority[gaugeType(test)] ?? 0) === bestGaugePriority);
+  const primaryTests = tests.filter((test) => test.isPrimaryAcceptanceBlock === true || test.selectedForFinalValues === true);
+  if (primaryTests.length) tests = primaryTests;
+  const requirementTests = tests.filter((test) => /(?:\bMIN\.?|\bMAX\.?|>=|<=|≥|≤|\bREQUIREMENTS?\b|\bANFORDERUNGEN?\b|\bCONDITIONS?\b|\(\s*\d+(?:[.,]\d+)?\s*\/\s*\d+)/i.test(String(test.sourceQuote ?? '')));
+  if (requirementTests.length && requirementTests.length < tests.length) tests = requirementTests;
+  const roomTemperatureTests = tests.filter((test) => {
+    const temperature = evidenceNumber(test.temperatureC);
+    return temperature !== null && temperature >= 20 && temperature <= 23;
+  });
+  if (roomTemperatureTests.length) tests = roomTemperatureTests;
+  if (tests.length) {
+    const groups = new Map();
+    for (const test of tests) {
+      const group = String(test._chunkIndex ?? 'MODEL') + ':' + (canonicalEvidence(test.comparableGroupId ?? test.testBlockId) || 'UNKNOWN');
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(test);
+    }
+    if (groups.size > 1) {
+      const scoredGroups = [...groups.values()].map((groupTests) => ({
+        tests: groupTests,
+        score: groupTests.reduce((score, test) => score + ['yieldStrength02', 'tensileStrength', 'elongation', 'elongationA5', 'elongationA4'].filter((field) => evidenceNumber(test[field]) !== null).length, 0),
+        invalidOffsets: groupTests.filter((test) => { const yield02 = evidenceNumber(test.yieldStrength02); const yield10 = evidenceNumber(test.yieldStrength10); return yield02 !== null && yield10 !== null && yield10 < yield02; }).length,
+        firstChunk: Math.min(...groupTests.map((test) => Number(test._chunkIndex ?? 9999))),
+      })).sort((left, right) => left.invalidOffsets - right.invalidOffsets || right.score - left.score || left.firstChunk - right.firstChunk);
+      tests = scoredGroups[0].tests;
+    }
+  }
+  if (tests.length) {
+    const normalizedTests = tests.map((test) => ({
+      ...test,
+      elongation: evidenceValue(test.elongation) ?? (gaugeType(test) === 'A4' ? evidenceValue(test.elongationA4) : evidenceValue(test.elongationA5)),
+    }));
+    for (const field of ['yieldStrength02', 'tensileStrength']) {
+      const minimum = fieldMinimum(normalizedTests, field);
+      if (minimum !== null) row[field] = minimum;
+    }
+    const preferredElongationTests = normalizedTests.filter((test) => test.isPreferredElongationColumn === true);
+    const elongation = fieldMinimum(preferredElongationTests.length ? preferredElongationTests : normalizedTests, 'elongation');
+    if (elongation !== null) row.elongation = elongation;
+    const explicitRp10Tests = normalizedTests.filter((test) => test.yieldStrength10Explicit === true || /RP\s*1(?:[.,]0)?|1\s*%/i.test(String(test.columnHeaders ?? '')));
+    const yieldStrength10 = fieldMinimum(explicitRp10Tests, 'yieldStrength10');
+    if (yieldStrength10 !== null) row.yieldStrength10 = yieldStrength10;
+  }
+  const yield02 = evidenceNumber(row.yieldStrength02);
+  const yield10 = evidenceNumber(row.yieldStrength10);
+  if (yield02 !== null && yield10 !== null && yield10 < yield02) {
+    row.yieldStrength10 = -1;
+    row.humanRequired = true;
+    row.mechanicalValidationError = 'Rp1.0 is lower than Rp0.2; likely column or row drift.';
+  }
+  return row;
+};`;
+  const correctionStart = finalValidation.parameters.jsCode.indexOf("const evidenceValue =");
+  const correctionEndMarker = "  return row;\n};";
+  const correctionEnd = correctionStart >= 0 ? finalValidation.parameters.jsCode.indexOf(correctionEndMarker, correctionStart) : -1;
+  if (correctionStart >= 0 && correctionEnd >= 0) {
+    finalValidation.parameters.jsCode = finalValidation.parameters.jsCode.slice(0, correctionStart)
+      + deterministicCorrectionCode
+      + finalValidation.parameters.jsCode.slice(correctionEnd + correctionEndMarker.length);
+  } else if (!finalValidation.parameters.jsCode.includes("const correctCertificateRow =")) {
+    finalValidation.parameters.jsCode = finalValidation.parameters.jsCode.replace(
+      "const normalized = rows.map((row) => {",
+      deterministicCorrectionCode + "\nconst normalized = rows.map((sourceRow) => {\n  const row = correctCertificateRow(sourceRow);"
+    );
+  }
+  finalValidation.parameters.jsCode = finalValidation.parameters.jsCode
+    .replace(
+      "const dm = dimensionsRaw.match(/(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:mm[^0-9]*)?(?:x|×|\\/)\\s*(\\d{1,4}(?:[.,]\\d+)?)/i);\n  const dimensions = dimensionsRaw === '-1' ? '-1' : (dm ? dm[1].replace(',', '.') + ' x ' + dm[2].replace(',', '.') + ' mm' : '-1');",
+      "const dimensionPairs = [...dimensionsRaw.matchAll(/(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:mm[^0-9]*)?(?:x|×)\\s*(\\d{1,4}(?:[.,]\\d+)?)/gi)];\n  const dimensions = dimensionsRaw === '-1' ? '-1' : (dimensionPairs.length ? dimensionPairs.map(match => match[1].replace(',', '.') + ' x ' + match[2].replace(',', '.')).join(' / ') + ' mm' : '-1');"
+    )
+    .replace(
+      "certificateNumber: toString(row.certificateNumber), quantity, creditor:",
+      "certificateNumber: toString(row.certificateNumber), rawMaterialCertificate: toString(row.rawMaterialCertificate), quantity, creditor:"
+    );
+}
+
+const normalizationPreparation = workflow.nodes.find((node) => node.name === "Belege sammeln und Normalisierung bauen");
+if (normalizationPreparation) {
+  const legacyTraceSchema = "    deckSelection: { documentRole: 'DECK', sourceBlockIndex: 'number', sourcePage: 'string|number|null', selectionReason: 'string', certificateNumber: 'string', customerOrderNumber: 'string', manufacturer: 'string', product: 'string', dimensions: 'string', material: 'string', quantity: 'number' },\n    mechanicalSelection: { selectedComparableGroupId: 'string', gaugeLengthType: 'A5|5D|A4|2IN|OTHER|UNKNOWN', selectionReason: 'string', tests: [{ comparableGroupId: 'string', testBlockId: 'string', specimenId: 'string|null', specimenLocation: 'string|null', gaugeLengthType: 'A5|5D|A4|2IN|OTHER|UNKNOWN', temperatureC: 'number|null', columnHeaders: 'string', yieldStrength02: 'number|null', yieldStrength10: 'number|null', yieldStrength10Explicit: 'boolean', tensileStrength: 'number|null', elongation: 'number|null', sourceQuote: 'string' }] },\n";
+  const traceSchema = "    deckSelection: { documentRole: 'DECK', sourceBlockIndex: 'number', sourcePage: 'string|number|null', selectionReason: 'string', certificateNumber: 'string', customerOrderNumber: 'string', manufacturer: 'string', product: 'string', dimensions: 'string', material: 'string', quantity: 'number' },\n    mechanicalSelection: { selectedComparableGroupId: 'string', gaugeLengthType: 'A5|5D|A4|2IN|OTHER|UNKNOWN', selectionReason: 'string', tests: [{ comparableGroupId: 'string', testBlockId: 'string', specimenId: 'string|null', specimenLocation: 'string|null', gaugeLengthType: 'A5|5D|A4|2IN|OTHER|UNKNOWN', elongationColumnType: 'A5|5D|A4|2IN|FS|PRIMARY|SECONDARY|UNKNOWN', isPreferredElongationColumn: 'boolean', temperatureC: 'number|null', columnHeaders: 'string', yieldStrength02: 'number|null', yieldStrength10: 'number|null', yieldStrength10Explicit: 'boolean', tensileStrength: 'number|null', elongation: 'number|null', sourceQuote: 'string' }] },\n";
+  normalizationPreparation.parameters.jsCode = normalizationPreparation.parameters.jsCode
+    .replaceAll(legacyTraceSchema, "")
+    .replaceAll(traceSchema, "")
+    .replace(
+      "certificateNumber: 'string', quantity: 'number', creditor:",
+      "certificateNumber: 'string', rawMaterialCertificate: 'string', quantity: 'number', creditor:"
+    )
+    .replace(
+      /Übernimm certificateNumber, customerOrderNumber, quantity, creditor, product, dimensions und werkstoff aus dem Deckzeugnis\.(?: rawMaterialCertificate ist die Nummer des eindeutig zugeordneten Roh-\/Vormaterialzeugnisses; fehlt eine solche Anlage, ist der Wert -1\.)*/g,
+      "Übernimm certificateNumber, customerOrderNumber, quantity, creditor, product, dimensions und werkstoff aus dem Deckzeugnis. rawMaterialCertificate ist die Nummer des eindeutig zugeordneten Roh-/Vormaterialzeugnisses; fehlt eine solche Anlage, ist der Wert -1."
+    )
+    .replace(
+      "Bei mehreren vergleichbaren Messungen je Feld den kleinsten Wert derselben Schmelze verwenden.",
+      "Bei mehreren Messblöcken derselben Schmelze den primären, durch Prüfanforderungen und Probenlage der Produktposition belegten Abnahmeblock verwenden."
+    )
+    .replace(
+      "    yieldStrength02: 'number', yieldStrength10:",
+      traceSchema + "    yieldStrength02: 'number', yieldStrength10:"
+    );
+}
+appendPromptRule(
+  normalizationPreparation,
+  "  'Übernimm certificateNumber, customerOrderNumber, quantity, creditor, product, dimensions und werkstoff aus dem Deckzeugnis. rawMaterialCertificate ist die Nummer des eindeutig zugeordneten Roh-/Vormaterialzeugnisses; fehlt eine solche Anlage, ist der Wert -1. Nutze angehängte Vormaterialzeugnisse nur für die zugehörige Chemie, Mechanik und ergänzende Normen.',",
+  deckCertificateRule,
+);
+appendPromptRule(
+  normalizationPreparation,
+  "  '" + deckCertificateRule + "',",
+  coverCertificateRule,
+);
+appendPromptRule(
+  normalizationPreparation,
+  "  'Mechanik aus Messwerten bei Raumtemperatur (typisch 20 bis 23 °C). Bei mehreren vergleichbaren Messungen je Feld den kleinsten Wert derselben Schmelze verwenden. A5 bevorzugen; A4 nur verwenden, wenn kein A5-Wert belegt ist. yieldStrength10 nur bei ausdrücklich 1,0 % Offset.',",
+  exactMechanicalRule,
+);
+appendPromptRule(
+  normalizationPreparation,
+  "  '" + exactMechanicalRule + "',",
+  offsetYieldRule,
+);
+appendPromptRule(normalizationPreparation, "  '" + offsetYieldRule + "',", deterministicMechanicalRule);
+appendPromptRule(normalizationPreparation, "  '" + deterministicMechanicalRule + "',", deckTraceRule);
+appendPromptRule(normalizationPreparation, "  '" + deckTraceRule + "',", stackedMechanicalRowsRule);
+appendPromptRule(normalizationPreparation, "  '" + stackedMechanicalRowsRule + "',", pairedMechanicalColumnsRule);
+appendPromptRule(normalizationPreparation, "  '" + pairedMechanicalColumnsRule + "',", acceptanceBlockRule);
+appendPromptRule(normalizationPreparation, "  '" + coverCertificateRule + "',", headerLabelRule);
+appendPromptRule(normalizationPreparation, "  '" + headerLabelRule + "',", materialStandardRule);
+const qualityPreparation = workflow.nodes.find((node) => node.name === "Qualitätsprüfung vorbereiten");
+if (qualityPreparation) {
+  qualityPreparation.parameters.jsCode = qualityPreparation.parameters.jsCode
+    .replace(
+      /Chemie und Mechanik aus dem je Schmelze referenzierten Vormaterialzeugnis\.(?: Dessen Zertifikatsnummer als rawMaterialCertificate erhalten\.)*/g,
+      "Chemie und Mechanik aus dem je Schmelze referenzierten Vormaterialzeugnis. Dessen Zertifikatsnummer als rawMaterialCertificate erhalten."
+    )
+    .replace(
+      "Bei mehreren vergleichbaren Messungen den kleinsten Wert je Feld verwenden;",
+      "Bei mehreren Messblöcken den primären, durch Prüfanforderungen und Probenlage belegten Abnahmeblock verwenden;"
+    );
+}
+appendPromptRule(
+  qualityPreparation,
+  "  'Bei einem Deckzeugnis mit Vormaterialanlagen gilt: Report-/Zertifikatsnummer, Kundenbestellung, Position, Menge, Aussteller, Produkt, Abmessung und Werkstoff stammen vom Deckzeugnis; Chemie und Mechanik aus dem je Schmelze referenzierten Vormaterialzeugnis. Dessen Zertifikatsnummer als rawMaterialCertificate erhalten.',",
+  deckCertificateRule,
+);
+appendPromptRule(
+  qualityPreparation,
+  "  '" + deckCertificateRule + "',",
+  coverCertificateRule,
+);
+appendPromptRule(
+  qualityPreparation,
+  "  'Mechanik bei Raumtemperatur 20 bis 23 °C bevorzugen. Bei mehreren vergleichbaren Messungen den kleinsten Wert je Feld verwenden; A5 bevorzugen und A4 nicht mit A5 mischen.',",
+  exactMechanicalRule,
+);
+appendPromptRule(
+  qualityPreparation,
+  "  '" + exactMechanicalRule + "',",
+  offsetYieldRule,
+);
+appendPromptRule(qualityPreparation, "  '" + offsetYieldRule + "',", deterministicMechanicalRule);
+appendPromptRule(qualityPreparation, "  '" + deterministicMechanicalRule + "',", deckTraceRule);
+appendPromptRule(qualityPreparation, "  '" + deckTraceRule + "',", stackedMechanicalRowsRule);
+appendPromptRule(qualityPreparation, "  '" + stackedMechanicalRowsRule + "',", pairedMechanicalColumnsRule);
+appendPromptRule(qualityPreparation, "  '" + pairedMechanicalColumnsRule + "',", acceptanceBlockRule);
+appendPromptRule(qualityPreparation, "  '" + coverCertificateRule + "',", headerLabelRule);
+appendPromptRule(qualityPreparation, "  '" + headerLabelRule + "',", materialStandardRule);
+
+const mineruErrorPreparation = workflow.nodes.find((node) => node.name === "MinerU-Fehler vorbereiten");
+if (mineruErrorPreparation) {
+  mineruErrorPreparation.parameters.jsCode = mineruErrorPreparation.parameters.jsCode.replace(
+    "const original = $('Einordnung lesen').first().json;",
+    "let original = {};\ntry { original = $('Einordnung lesen').first().json; } catch {}\nif (!original.mailId) { try { original = $('Evaluations-PDF vorbereiten').first().json; } catch {} }"
+  );
+}
+
+for (const [name, tries, delay] of [
+  ["MinerU-Status prüfen", 3, 5000],
+  ["PDF mit MinerU lesen", 3, 5000],
+  ["Dokumentenreview anlegen", 3, 5000],
+  ["Original-PDF in Review-Speicher hochladen", 3, 5000],
+  ["Dokumentenreview-Upload abschließen", 3, 5000],
+  ["MinerU-Fehler an Absender", 3, 2000],
+  ["MinerU-Ausgabe an Absender", 3, 2000],
+  ["Bestätigung per Outlook", 3, 2000],
+  ["Ergebnis per Outlook senden", 3, 2000]
+]) {
+  const node = workflow.nodes.find((entry) => entry.name === name);
+  if (!node) continue;
+  node.retryOnFail = true;
+  node.maxTries = tries;
+  node.waitBetweenTries = delay;
+}
+
+function upsertNode(definition) {
+  const current = workflow.nodes.find((node) => node.name === definition.name);
+  if (current) Object.assign(current, definition);
+  else workflow.nodes.push(definition);
+}
+
+upsertNode({
+  parameters: {
+    jsCode: "const item = $input.first();\nreturn [{ json: { ...item.json, mineruPollStartedAt: Date.now(), mineruMaxPollingMs: 10 * 60 * 1000 }, binary: item.binary }];"
+  },
+  id: "30df4a44-030c-492c-8e0c-886515644d9a",
+  name: "MinerU-Polling initialisieren",
+  type: "n8n-nodes-base.code",
+  typeVersion: 2,
+  position: [1824, -16]
+});
+upsertNode({
+  parameters: {
+    jsCode: "const status = $input.first().json;\nconst started = $('MinerU-Polling initialisieren').first().json;\nconst statusValue = String(status.extraction_status ?? status.status ?? '').toLowerCase();\nconst timedOut = !['succeeded','failed'].includes(statusValue) && Date.now() - Number(started.mineruPollStartedAt) >= Number(started.mineruMaxPollingMs);\nreturn [{ json: timedOut ? { ...status, extraction_status: 'failed', mineruTimedOut: true, error: 'MinerU polling exceeded 10 minutes.' } : status }];"
+  },
+  id: "67ab9fea-9a31-45db-af66-4000726740bb",
+  name: "MinerU-Polling begrenzen",
+  type: "n8n-nodes-base.code",
+  typeVersion: 2,
+  position: [2336, -16]
+});
+workflow.connections["PDF bei MinerU einreichen"] = { main: [[{ node: "MinerU-Polling initialisieren", type: "main", index: 0 }]] };
+workflow.connections["MinerU-Polling initialisieren"] = { main: [[{ node: "Auf MinerU warten", type: "main", index: 0 }]] };
+workflow.connections["MinerU-Status prüfen"] = { main: [[{ node: "MinerU-Polling begrenzen", type: "main", index: 0 }]] };
+workflow.connections["MinerU-Polling begrenzen"] = { main: [[
+  { node: "Bearbeitungslease erneuern", type: "main", index: 0 },
+  { node: "MinerU fertig?", type: "main", index: 0 }
+]] };
+
+const notificationGateCode = kind => `const item = $input.first();
+const key = String(item.json.replyMailId ?? item.json.sourceMails?.certificate?.id ?? item.json.correlationKey ?? 'unknown');
+const state = $getWorkflowStaticData('global');
+state.certificateNotifications ??= {};
+const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+for (const [id, value] of Object.entries(state.certificateNotifications)) if (Number(value.updatedAt ?? 0) < cutoff) delete state.certificateNotifications[id];
+return [{ json: { ...item.json, notificationKey: key, notificationAlreadySent: Boolean(state.certificateNotifications[key]?.${kind}) }, binary: item.binary }];`;
+const notificationRememberCode = (kind, sourceNode) => `const item = $input.first();
+const source = $('${sourceNode}').first().json;
+const key = String(source.notificationKey ?? source.replyMailId ?? source.sourceMails?.certificate?.id ?? source.correlationKey ?? 'unknown');
+const state = $getWorkflowStaticData('global');
+state.certificateNotifications ??= {};
+state.certificateNotifications[key] = { ...(state.certificateNotifications[key] ?? {}), ${kind}: true, updatedAt: Date.now() };
+return $input.all().map(entry => ({ ...entry, json: { ...source, ...entry.json }, binary: entry.binary ?? item.binary }));`;
+
+upsertNode({ parameters: { jsCode: notificationGateCode("mineru") }, id: "c983ad35-07c5-4421-83cb-250009592ed2", name: "MinerU-Antwortstatus prüfen", type: "n8n-nodes-base.code", typeVersion: 2, position: [3104, -224] });
+upsertNode({
+  parameters: { conditions: { options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 }, conditions: [{ id: "ac3abb08-12e3-448f-87c7-fcbd2f98e52b", leftValue: "={{ $json.notificationAlreadySent }}", rightValue: true, operator: { type: "boolean", operation: "true", singleValue: true } }], combinator: "and" }, options: {} },
+  id: "00cfde9a-09c9-4446-b4c5-363c8c4f2288", name: "MinerU-Antwort bereits gesendet?", type: "n8n-nodes-base.if", typeVersion: 2.2, position: [3360, -224]
+});
+upsertNode({ parameters: { jsCode: notificationRememberCode("mineru", "MinerU-Antwortstatus prüfen") }, id: "21032073-35f5-45cc-92ab-8b24259978b3", name: "MinerU-Antwort merken", type: "n8n-nodes-base.code", typeVersion: 2, position: [3872, -224] });
+workflow.connections["MinerU-Ausgabe für Antwort vorbereiten"] = { main: [[{ node: "MinerU-Antwortstatus prüfen", type: "main", index: 0 }]] };
+workflow.connections["MinerU-Antwortstatus prüfen"] = { main: [[{ node: "MinerU-Antwort bereits gesendet?", type: "main", index: 0 }]] };
+workflow.connections["MinerU-Antwort bereits gesendet?"] = { main: [[], [{ node: "MinerU-Ausgabe an Absender", type: "main", index: 0 }]] };
+workflow.connections["MinerU-Ausgabe an Absender"] = { main: [[{ node: "MinerU-Antwort merken", type: "main", index: 0 }]] };
+workflow.connections["MinerU-Antwort merken"] = { main: [[]] };
+
+upsertNode({ parameters: { jsCode: notificationGateCode("result") }, id: "8f25c804-54f9-4f05-9981-7964e4d4cbf6", name: "Ergebnisantwortstatus prüfen", type: "n8n-nodes-base.code", typeVersion: 2, position: [4416, 16] });
+upsertNode({
+  parameters: { conditions: { options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 }, conditions: [{ id: "bb1f9228-5d26-4dc2-87e0-0543ab6e7a6a", leftValue: "={{ $json.notificationAlreadySent }}", rightValue: true, operator: { type: "boolean", operation: "true", singleValue: true } }], combinator: "and" }, options: {} },
+  id: "cf27a382-fda8-4d9d-8371-1e1342dfe1af", name: "Ergebnisantwort bereits gesendet?", type: "n8n-nodes-base.if", typeVersion: 2.2, position: [4672, 16]
+});
+upsertNode({ parameters: { jsCode: notificationRememberCode("result", "Ergebnisantwortstatus prüfen") }, id: "dc490fcc-0dca-465a-bda0-a067f0dbbb38", name: "Ergebnisantwort merken", type: "n8n-nodes-base.code", typeVersion: 2, position: [5184, 16] });
+workflow.connections["Dokumentenreview im Ergebnis verknüpfen"] = { main: [[{ node: "Ergebnisantwortstatus prüfen", type: "main", index: 0 }]] };
+workflow.connections["Ergebnisantwortstatus prüfen"] = { main: [[{ node: "Ergebnisantwort bereits gesendet?", type: "main", index: 0 }]] };
+workflow.connections["Ergebnisantwort bereits gesendet?"] = { main: [
+  [{ node: "Outlook-Mail erfolgreich abschließen", type: "main", index: 0 }],
+  [{ node: "Ergebnis per Outlook senden", type: "main", index: 0 }]
+] };
+workflow.connections["Ergebnis per Outlook senden"] = { main: [[{ node: "Ergebnisantwort merken", type: "main", index: 0 }]] };
+workflow.connections["Ergebnisantwort merken"] = { main: [[{ node: "Outlook-Mail erfolgreich abschließen", type: "main", index: 0 }]] };
+
+const dispatcherPath = path.join(ROOT, "workflows/outlook-certificate-dispatcher.json");
+const dispatcher = JSON.parse(readFileSync(dispatcherPath, "utf8"));
+dispatcher.settings ??= {};
+delete dispatcher.settings.concurrency;
+const dispatcherPlanner = dispatcher.nodes.find((node) => node.name === "Queue planen");
+if (dispatcherPlanner && !dispatcherPlanner.parameters.jsCode.includes("DISPATCHER_LOCK_MS")) {
+  dispatcherPlanner.parameters.jsCode = dispatcherPlanner.parameters.jsCode.replace(
+    "const OWN_ADDRESS = 'certificates@daimension.de';\n\nconst state = $getWorkflowStaticData('global');",
+    "const OWN_ADDRESS = 'certificates@daimension.de';\nconst DISPATCHER_LOCK_MS = 55 * 1000;\n\nconst state = $getWorkflowStaticData('global');\nconst dispatcherExecutionId = String($execution?.id ?? 'unknown');\nconst dispatcherLock = state.dispatcherLock ?? {};\nif (dispatcherLock.owner !== dispatcherExecutionId && Number(dispatcherLock.expiresAt ?? 0) > Date.now()) return [];\nstate.dispatcherLock = { owner: dispatcherExecutionId, expiresAt: Date.now() + DISPATCHER_LOCK_MS };"
+  );
+}
+writeFileSync(dispatcherPath, `${JSON.stringify(dispatcher, null, 2)}\n`);
 
 writeFileSync(workflowPath, `${JSON.stringify(workflow, null, 2)}\n`);
 console.log(`Prepared ${workflowPath}`);

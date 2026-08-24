@@ -69,11 +69,16 @@ single-message worker. The dispatcher treats unread messages as its queue,
 claims at most five messages with the `DAIMENSION-PROCESSING` Outlook category,
 and starts one asynchronous worker execution for each claimed message. Overflow
 stays unread until a slot becomes free. A worker renews its lease during long
-MinerU and DeepSeek stages. A message without a heartbeat for 15 minutes is
+MinerU and DeepSeek stages. A 55-second dispatcher lease prevents overlapping
+schedule ticks from claiming the same unread message.
+A message without a heartbeat for 15 minutes is
 retried up to three times; after the third stale attempt it remains unread with the
 `DAIMENSION-FAILED` category. On first activation, the dispatcher includes the
 unread backlog from the preceding 24 hours. Successful messages are marked read
-and have the queue categories removed.
+and have the queue categories removed. MinerU polling stops after ten minutes;
+transient MinerU, document-review, and Outlook operations retry three times.
+Successful intermediate and final sender notifications are recorded for 30 days
+so a later worker retry does not send the same response twice.
 
 The certificate worker analyzes each Outlook message independently. PDF
 attachments are uploaded to dataset `4037` through
@@ -100,7 +105,9 @@ and confirmed to the sender, but they never delay or gate the certificate
 analysis. Composite certificates are resolved position by position: values from
 the issuing cover certificate are combined with heat-specific chemistry and
 mechanics from attached raw-material certificates. A heat number may therefore
-appear in multiple result rows when it belongs to multiple pipe positions.
+appear in multiple result rows when it belongs to multiple pipe positions. Each
+composite row also retains the linked source certificate number in
+`rawMaterialCertificate`.
 
 Run the local certificate regression against a source PDF without uploading it
 to an external service:
@@ -116,6 +123,23 @@ without connecting to Outlook:
 npm run test:email-queue
 ```
 
+Run the deterministic schema and scoring checks for all nine evaluation PDFs:
+
+```sh
+npm run test:certificate-suite
+```
+
+Run all portable local checks together:
+
+```sh
+npm test
+```
+
+These checks validate source markers, normalization, graph behavior, and scoring.
+They do not replace a live MinerU/DeepSeek evaluation run; the two image-only
+certificates are exercised end to end only when n8n and its credentials are
+available.
+
 ## Certificate evaluations
 
 The worker contains a configured n8n Evaluation Trigger named
@@ -126,12 +150,21 @@ before `PDF-Upload vorbereiten`, so evaluations use the same
 `pdf.daimension.ai` MinerU/OCR endpoint and the same dAImension LLM extraction
 as real email certificates.
 
-After extraction, `Mit DeepSeek bewerten` compares only the facts in
-`expectedAnswer` with the actual structured result. `Evaluation – Ergebnis
-speichern` writes `actualAnswer`, `judgeScore`, `judgeReasoning`, and `passed`
-back to the dataset. `Evaluation – Metriken setzen` records `correctness`
-(1–5, displayed by n8n as a normalized percentage) and `Pass rate` (0 or 1) in
-n8n's Evaluations tab. Evaluation executions
+After extraction, `Evaluation deterministisch bewerten` compares only the facts
+in `expectedAnswer` with the actual structured result. Numeric values use a
+small explicit tolerance; arrays of comparable mechanical measurements resolve
+to the same minimum-value policy used by production. Multi-position rows are
+matched by heat and dimensions. Every evaluation position also contains the
+expected heat-analysis chemistry. Chemical measurements are compared element
+by element with a strict numeric tolerance and must remain assigned to the
+correct heat. Missing, incorrectly scaled, or wrong-heat chemical values set
+`chemistryPassed=0` and always invalidate the complete evaluation run.
+`Evaluation – Ergebnis speichern` writes `actualAnswer`, `judgeScore`,
+`judgeReasoning`, `chemistryScore`, `chemistryReasoning`, `chemistryPassed`, and
+`passed` back to the dataset. `Evaluation – Metriken setzen` records
+`correctness`, `Chemistry score`, `Chemistry pass rate`, and `Pass rate` in
+n8n's Evaluations tab. The extraction model does not grade its own answer.
+Evaluation executions
 do not create document reviews or send/update Outlook messages.
 
 For a manual canvas test, execute from `Evaluations-Eingang (manuell)`. The
@@ -143,13 +176,23 @@ do not create a document review or send/update Outlook messages. Set Outputs
 is skipped during a manual execution because only a real Evaluation Trigger run
 has a dataset row identity to update.
 
-Prepare the workflow and provision the nine PDF rows plus the OpenAI-compatible
-dAImension judge credential:
+Provision or refresh the nine PDF rows, inject the actual Data Table ID into the
+workflow, and then prepare the evaluation nodes:
 
 ```sh
-npm run prepare:evaluations
 npm run setup:evaluations
+npm run prepare:evaluations
 ```
+
+To update corrected expected answers without reading or uploading the PDFs again:
+
+```sh
+npm run setup:evaluations -- --expected-only
+```
+
+Setup upserts every case by `caseId`, so changed PDFs and expected answers replace
+stale table data. For offline preparation, set
+`CERTIFICATE_EVALUATION_TABLE_ID` explicitly.
 
 The workflow is fully configured after these commands. Start the nine-case run
 from the Evaluations tab or through the repository helper:
@@ -169,13 +212,14 @@ EVALUATION_CASE_ID=silcotub-02-25-25339 npm run prepare:evaluations
 ```
 
 Set `CERTIFICATE_PDF_DIR` if the nine source PDFs are not in
-`/Users/mdklause/Downloads`. Re-running setup is idempotent by `caseId` and
-does not duplicate existing rows.
+`/Users/mdklause/Downloads`. Re-running setup updates rows by `caseId` and does
+not duplicate them.
 
 The regression checks the source values, compiles every n8n Code node, executes
 the evidence-block and critical-source selection, repairs common malformed LLM
 JSON responses, and verifies position-preserving chemical and dimension
-normalization.
+normalization. The nine-case suite additionally rejects missing chemical
+elements, decimal-scale errors, and chemistry assigned to the wrong heat.
 
 Before activation, configure the Microsoft Outlook OAuth2 credential on the
 dispatcher and all worker reply/update nodes. The credential needs
@@ -208,8 +252,8 @@ the dispatcher. The worker keeps its existing workflow id and is called by the
 dispatcher; it no longer polls Outlook directly.
 
 ```sh
-node scripts/n8n.js update workflows/outlook-certificate-analysis.json --activate
-node scripts/n8n.js deploy workflows/outlook-certificate-dispatcher.json --activate
+node scripts/n8n.js update workflows/outlook-certificate-analysis.json --activate --publish
+node scripts/n8n.js deploy workflows/outlook-certificate-dispatcher.json --activate --publish
 ```
 
 Update existing workflows in n8n without creating missing ones:

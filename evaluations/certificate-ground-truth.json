@@ -9,8 +9,8 @@
       "customerOrderNumber": "PO-25-RFS003046",
       "creditor": "Unicorn GmbH Tailormade Processing",
       "positions": [
-        { "heatNumber": "475670", "quantity": 2, "dimensions": "193.7 x 22.2 mm", "material": "1.4541", "yieldStrength02": 233, "yieldStrength10": 278, "tensileStrength": 529, "elongation": 42.9 },
-        { "heatNumber": "901972", "quantity": 2, "dimensions": "133.0 x 14.2 mm", "material": "1.4541", "yieldStrength02": 259, "yieldStrength10": 293, "elongation": 50.1 }
+        { "heatNumber": "475670", "quantity": 2, "dimensions": "193.7 x 22.2 mm", "material": "1.4541", "yieldStrength02": 233, "yieldStrength10": 278, "tensileStrength": 529, "elongation": 42.9, "chemicals": { "C": 0.044, "SI": 0.24, "MN": 1.27, "P": 0.036, "S": 0.005, "CR": 17.6, "MO": 0.42, "NI": 9.84, "CU": 0.38, "V": 0.05, "W": 0.04, "CO": 0.18, "AL": 0.045, "N": 0.0094, "TI": 0.43 } },
+        { "heatNumber": "901972", "quantity": 2, "dimensions": "133.0 x 14.2 mm", "material": "1.4541", "yieldStrength02": 259, "yieldStrength10": 293, "elongation": 50.1, "chemicals": { "C": 0.043, "MN": 1.59, "SI": 0.406, "P": 0.031, "S": 0.021, "CR": 17.11, "NI": 9.06, "CO": 0.249, "TI": 0.436, "N": 0.01 } }
       ]
     }
   },
@@ -22,7 +22,7 @@
     "expected": {
       "certificateNumber": "VPTL/EXP/MTC/26/1233",
       "customerOrderNumber": "PO-24-0012405",
-      "positions": [{ "heatNumber": "N3164", "quantity": 53, "dimensions": "35.00 x 3.00 mm", "material": "TP316Ti / 1.4571", "yieldStrength02": [279.26, 327.21], "yieldStrength10": [301.87, 358.29], "tensileStrength": [608.63, 613.85], "elongation": [63, 64] }]
+      "positions": [{ "heatNumber": "N3164", "quantity": 53, "dimensions": "35.00 x 3.00 mm", "material": "TP316Ti / 1.4571", "yieldStrength02": [279.26, 327.21], "yieldStrength10": [301.87, 358.29], "tensileStrength": [608.63, 613.85], "elongation": [63, 64], "chemicals": { "C": 0.02, "SI": 0.45, "MN": 1.62, "P": 0.035, "S": 0.001, "CR": 16.92, "NI": 10.58, "MO": 2.11, "N": 0.022, "TI": 0.26 } }]
     }
   },
   {
@@ -33,7 +33,7 @@
     "expected": {
       "certificateNumber": "26030318",
       "customerOrderNumber": "PO-26-RFS003506",
-      "positions": [{ "heatNumber": "333691", "quantity": 2, "product": "Eccentric reducer DIN EN 10253-2 Type A", "dimensions": "219.10 x 7.10 / 88.90 x 4.00 mm", "material": "P235GH", "yieldStrength02": 306, "tensileStrength": 447, "elongation": 35 }]
+      "positions": [{ "heatNumber": "333691", "quantity": 2, "product": "Eccentric reducer DIN EN 10253-2 Type A", "dimensions": "219.10 x 7.10 / 88.90 x 4.00 mm", "material": "P235GH", "yieldStrength02": 306, "tensileStrength": 447, "elongation": 35, "chemicals": { "C": 0.14, "SI": 0.2, "MN": 0.56, "P": 0.012, "S": 0.001, "AL": 0.027, "CU": 0.04, "CR": 0.07, "MO": 0.02, "NI": 0.06, "N": 0.002, "V": 0.001, "NB": 0.001, "Cr+Cu+Mo+Ni": 0.19 } }]
     }
   },
   {
@@ -44,7 +44,7 @@
     "expected": {
       "certificateNumber": "W089986",
       "customerOrderNumber": "PO-25-0012289",
-      "positions": [{ "heatNumber": "245086", "quantity": 12, "product": "T-piece / tee", "material": "1.4541", "yieldStrength02": 284, "yieldStrength10": 317, "tensileStrength": 547, "elongation": 52.5 }]
+      "positions": [{ "heatNumber": "245086", "quantity": 12, "product": "T-piece / tee", "material": "1.4541", "yieldStrength02": 271, "yieldStrength10": 306, "tensileStrength": 547, "elongation": 52.5, "chemicals": { "C": 0.048, "SI": 0.33, "MN": 1.74, "P": 0.038, "S": 0.003, "CR": 17.11, "MO": 0, "NI": 9.1, "CU": 0, "V": 0, "NB": 0, "AL": 0, "TI": 0.51, "N": 0.013 } }]
     }
   },
   {
@@ -55,7 +55,7 @@
     "expected": {
       "certificateNumber": "02-25-25339",
       "customerOrderNumber": "PO-25-0007714",
-      "positions": [{ "heatNumber": "938166", "quantity": 13, "dimensions": "114.30 x 16.00 mm", "material": "X10CrMoVNb9-1 / P91 Type 2", "yieldStrength02": [512, 511, 509], "tensileStrength": [679, 683], "elongation": [37.5, 40, 26, 28] }]
+      "positions": [{ "heatNumber": "938166", "quantity": 13, "dimensions": "114.30 x 16.00 mm", "material": "X10CrMoVNb9-1 / P91 Type 2", "yieldStrength02": [512, 511, 509], "tensileStrength": [679, 683], "elongation": [37.5, 40, 26, 28], "chemicals": { "C": 0.11, "MN": 0.4, "SI": 0.28, "NI": 0.08, "CR": 8.62, "MO": 0.9, "V": 0.2, "CU": 0.07, "P": 0.012, "S": 0.003, "SN": 0.004, "AL": 0.006, "TI": 0.001, "NB": 0.066, "As": 0.005, "N": 0.0588, "B": 0.0003, "Sb": 0.0018, "W": 0.0003, "Zr": 0.0026 } }]
     }
   },
   {
@@ -66,7 +66,7 @@
     "expected": {
       "certificateNumber": "02-26-07006",
       "customerOrderNumber": "PO-25-RFS002563",
-      "positions": [{ "heatNumber": "753932", "quantity": 22, "dimensions": "57.00 x 3.60 mm", "material": "P235GH TC2", "yieldStrength02": [279, 307], "tensileStrength": [416, 425], "elongation": [30.5, 36] }]
+      "positions": [{ "heatNumber": "753932", "quantity": 22, "dimensions": "57.00 x 3.60 mm", "material": "P235GH TC2", "yieldStrength02": [279, 307], "tensileStrength": [416, 425], "elongation": [30.5, 36], "chemicals": { "C": 0.08, "MN": 0.48, "SI": 0.18, "NI": 0.16, "CR": 0.08, "MO": 0.04, "CU": 0.2, "Cr+Cu+Mo+Ni": 0.48, "P": 0.01, "S": 0.003, "SN": 0.012, "AL": 0.024, "TI": 0.025, "N": 0.0072 } }]
     }
   },
   {
@@ -77,7 +77,7 @@
     "expected": {
       "certificateNumber": "WZ-00063408",
       "customerOrderNumber": "PO-26-RFS001721",
-      "positions": [{ "heatNumber": "57495K", "quantity": 15, "product": "Seamless elbows EN 10253-2 Type A", "dimensions": "323.9 x 6.3 mm", "material": "P235GH TC1", "yieldStrength02": 303, "tensileStrength": 425, "elongation": 35.4 }],
+      "positions": [{ "heatNumber": "57495K", "quantity": 15, "product": "Seamless elbows EN 10253-2 Type A", "dimensions": "323.9 x 6.3 mm", "material": "P235GH TC1", "yieldStrength02": 303, "tensileStrength": 425, "elongation": 35.4, "chemicals": { "C": 0.1, "SI": 0.222, "MN": 0.56, "P": 0.017, "S": 0.007, "CR": 0.05, "MO": 0.007, "NI": 0.04, "AL": 0.026, "CU": 0.07 } }],
       "rawMaterialCertificate": "73958/23"
     }
   },
@@ -89,7 +89,7 @@
     "expected": {
       "certificateNumber": "100000125315",
       "customerOrderNumber": "PO-25-0006028",
-      "positions": [{ "heatNumber": "Z4195", "quantity": 53, "product": "1-inch welding neck flange, class 150, Sch-40s RF", "material": "F316/F316L ASTM A182M", "yieldStrength02": 256.52, "yieldStrength10": 300.52, "tensileStrength": 551.18, "elongation": 62.2 }]
+      "positions": [{ "heatNumber": "Z4195", "quantity": 53, "product": "1-inch welding neck flange, class 150, Sch-40s RF", "material": "F316/F316L", "standards": ["ASTM A182M-24", "ASME SA-182M-23"], "yieldStrength02": 256.52, "yieldStrength10": 300.52, "tensileStrength": 551.18, "elongation": 62.2, "chemicals": { "C": 0.024, "SI": 0.35, "MN": 1.52, "P": 0.04, "S": 0.009, "CR": 16.78, "NI": 10.03, "MO": 2.02, "N": 0.073 } }]
     }
   },
   {
@@ -100,7 +100,7 @@
     "expected": {
       "certificateNumber": "01-26-02987",
       "customerOrderNumber": "PO-25-BBT000155",
-      "positions": [{ "heatNumber": "956643", "quantity": 1, "dimensions": "168.30 x 12.50 mm", "material": "16Mo3 TC2", "yieldStrength02": [367, 364, 369], "tensileStrength": [499, 498, 507], "elongation": [25.5, 27, 23.5] }]
+      "positions": [{ "heatNumber": "956643", "quantity": 1, "dimensions": "168.30 x 12.50 mm", "material": "16Mo3 TC2", "yieldStrength02": [367, 364, 369], "tensileStrength": [499, 498, 507], "elongation": [25.5, 27, 23.5], "chemicals": { "C": 0.17, "MN": 0.73, "SI": 0.25, "NI": 0.11, "CR": 0.1, "MO": 0.26, "CU": 0.14, "P": 0.008, "S": 0.003, "SN": 0.011, "AL": 0.031, "N": 0.0083 } }]
     }
   }
 ]

@@ -26,11 +26,12 @@ const message = (index, overrides = {}) => ({
   ...overrides,
 });
 
-async function plan(messages) {
+async function plan(messages, executionId = "queue-regression") {
   const input = { all: () => messages.map((json) => ({ json })) };
   const staticData = () => state;
-  const factory = new Function("$input", "$getWorkflowStaticData", `return async function () {\n${planner}\n}`);
-  return factory(input, staticData)();
+  const execution = { id: executionId };
+  const factory = new Function("$input", "$getWorkflowStaticData", "$execution", `return async function () {\n${planner}\n}`);
+  return factory(input, staticData, execution)();
 }
 
 function assert(condition, messageText) {
@@ -75,6 +76,13 @@ assert(workerTrigger?.type === "n8n-nodes-base.executeWorkflowTrigger", "Worker 
 const caller = dispatcher.nodes.find((node) => node.name === "Ein Worker pro E-Mail");
 assert(caller?.parameters?.mode === "each", "Dispatcher must execute the worker once per email");
 assert(caller?.parameters?.options?.waitForSubWorkflow === false, "Dispatcher must start workers asynchronously");
+assert(!Object.hasOwn(dispatcher.settings ?? {}, "concurrency"), "Dispatcher must not use the unsupported workflow concurrency setting");
+assert(planner.includes("DISPATCHER_LOCK_MS = 55 * 1000"), "Dispatcher must use a schedule-overlap lease");
+const overlapping = await plan([message(70)], "overlapping-execution");
+assert(overlapping.length === 0, "An overlapping dispatcher execution must not claim messages");
+state.dispatcherLock.expiresAt = Date.now() - 1;
+const afterLockExpiry = await plan([message(71)], "next-scheduled-execution");
+assert(afterLockExpiry.some((item) => item.json.action === "claim"), "A later schedule must claim after the dispatcher lease expires");
 
 const evidenceLoop = worker.nodes.find((node) => node.name === "DeepSeek-Belegblöcke nacheinander");
 assert(evidenceLoop?.type === "n8n-nodes-base.splitInBatches", "Evidence extraction must use an explicit item loop");
@@ -98,11 +106,53 @@ for (const deepSeekNodeName of [
   assert(deepSeekNode?.waitBetweenTries >= 20_000, `${deepSeekNodeName} must delay retries`);
 }
 
-for (const terminal of ["Bestätigung per Outlook", "Ergebnis per Outlook senden"]) {
-  const targets = worker.connections[terminal]?.main?.[0]?.map((entry) => entry.node) ?? [];
-  assert(targets.includes("Outlook-Mail erfolgreich abschließen"), `${terminal} must mark its email complete`);
-}
+const confirmationTargets = worker.connections["Bestätigung per Outlook"]?.main?.[0]?.map((entry) => entry.node) ?? [];
+assert(confirmationTargets.includes("Outlook-Mail erfolgreich abschließen"), "Bestätigung per Outlook must mark its email complete");
+const resultTargets = worker.connections["Ergebnis per Outlook senden"]?.main?.[0]?.map((entry) => entry.node) ?? [];
+assert(resultTargets.includes("Ergebnisantwort merken"), "Result email must persist its idempotency marker");
+const rememberedTargets = worker.connections["Ergebnisantwort merken"]?.main?.[0]?.map((entry) => entry.node) ?? [];
+assert(rememberedTargets.includes("Outlook-Mail erfolgreich abschließen"), "Remembered result email must mark its Outlook message complete");
 const reviewCreate = worker.nodes.find((node) => node.name === "Dokumentenreview anlegen");
 assert(reviewCreate?.parameters?.jsonBody === "={{ $json.reviewCreateRequest }}", "Document review retries must use the stable mail-based clientRequestId");
+
+for (const retryNodeName of [
+  "MinerU-Status prüfen",
+  "PDF mit MinerU lesen",
+  "Dokumentenreview anlegen",
+  "Original-PDF in Review-Speicher hochladen",
+  "Dokumentenreview-Upload abschließen",
+  "MinerU-Ausgabe an Absender",
+  "Ergebnis per Outlook senden",
+]) {
+  const node = worker.nodes.find((entry) => entry.name === retryNodeName);
+  assert(node?.retryOnFail === true && node.maxTries === 3, `${retryNodeName} must retry three times`);
+}
+
+const pollingLimit = worker.nodes.find((node) => node.name === "MinerU-Polling begrenzen");
+assert(pollingLimit?.parameters?.jsCode.includes("10 minutes"), "MinerU polling must have a ten-minute deadline");
+assert(worker.connections["MinerU-Status prüfen"]?.main?.[0]?.some((entry) => entry.node === "MinerU-Polling begrenzen"), "MinerU status must pass through the polling deadline");
+
+const notificationState = {};
+async function runNotificationNode(name, item, outputs = {}) {
+  const code = worker.nodes.find((node) => node.name === name)?.parameters?.jsCode;
+  assert(code, `${name} is missing`);
+  const input = { first: () => item, all: () => [item] };
+  const selectNode = (nodeName) => ({ first: () => outputs[nodeName]?.[0] });
+  const staticData = () => notificationState;
+  const factory = new Function("$input", "$", "$getWorkflowStaticData", `return async function () {\n${code}\n}`);
+  return factory(input, selectNode, staticData)();
+}
+const resultItem = { json: { replyMailId: "mail-idempotency", correlationKey: "PO-IDEMPOTENCY" } };
+const firstGate = await runNotificationNode("Ergebnisantwortstatus prüfen", resultItem);
+assert(firstGate[0].json.notificationAlreadySent === false, "First result notification must be sent");
+await runNotificationNode("Ergebnisantwort merken", resultItem, { "Ergebnisantwortstatus prüfen": firstGate });
+const secondGate = await runNotificationNode("Ergebnisantwortstatus prüfen", resultItem);
+assert(secondGate[0].json.notificationAlreadySent === true, "A retried result notification must be suppressed");
+const resultIf = worker.connections["Ergebnisantwort bereits gesendet?"]?.main ?? [];
+assert(resultIf[0]?.some((entry) => entry.node === "Outlook-Mail erfolgreich abschließen"), "Suppressed duplicate result must still complete the Outlook mail");
+assert(resultIf[1]?.some((entry) => entry.node === "Ergebnis per Outlook senden"), "First result must be sent through Outlook");
+
+assert(worker.nodes.some((node) => node.name === "Evaluation deterministisch bewerten"), "Evaluations must use deterministic scoring");
+assert(!worker.nodes.some((node) => node.name === "Mit DeepSeek bewerten"), "Extraction model must not judge its own evaluation output");
 
 console.log("Outlook queue regression checks passed.");

@@ -65,6 +65,12 @@ async function main() {
     case "execution-summary":
       await executionSummary(args[0]);
       break;
+    case "execution-node":
+      await executionNode(args[0], args.slice(1).join(" "));
+      break;
+    case "execution-field":
+      await executionField(args[0], args[1], args.slice(2).join(" "));
+      break;
     case "test-runs":
       await listTestRuns(args[0], args[1]);
       break;
@@ -81,7 +87,13 @@ async function main() {
       await watchTestRun(args[0], args[1], args[2]);
       break;
     case "test-cases":
-      await listTestCases(args[0], args[1], args[2], args.includes("--raw"));
+      await listTestCases(
+        args[0],
+        args[1],
+        args[2],
+        args.includes("--raw"),
+        args.includes("--failures"),
+      );
       break;
     default:
       printUsage();
@@ -379,6 +391,38 @@ async function executionSummary(id) {
   }, null, 2));
 }
 
+async function executionNode(id, nodeName) {
+  if (!id || !nodeName) {
+    throw new Error("Missing execution id or node name. Usage: node scripts/n8n.js execution-node EXECUTION_ID NODE_NAME");
+  }
+  const execution = await api(`/executions/${encodeURIComponent(id)}?includeData=true`);
+  const runs = execution.data?.resultData?.runData?.[nodeName] ?? [];
+  if (!runs.length) throw new Error(`Node '${nodeName}' did not execute in execution ${id}.`);
+  const output = runs.map((run, runIndex) => ({
+    runIndex,
+    error: run.error?.message ?? run.error?.description ?? null,
+    data: run.data?.main ?? [],
+  }));
+  console.log(JSON.stringify(output, null, 2));
+}
+
+async function executionField(id, field, nodeName) {
+  if (!id || !field || !nodeName) {
+    throw new Error("Usage: node scripts/n8n.js execution-field EXECUTION_ID FIELD NODE_NAME");
+  }
+  const execution = await api(`/executions/${encodeURIComponent(id)}?includeData=true`);
+  const runs = execution.data?.resultData?.runData?.[nodeName] ?? [];
+  if (!runs.length) throw new Error(`Node '${nodeName}' did not execute in execution ${id}.`);
+  const values = runs.flatMap((run) => run.data?.main?.flat() ?? []).map((item) => item?.json?.[field]);
+  if (!values.length || values.every((value) => value === undefined)) {
+    throw new Error(`Field '${field}' was not present in node '${nodeName}' for execution ${id}.`);
+  }
+  for (const value of values) {
+    if (typeof value === "string") console.log(value);
+    else console.log(JSON.stringify(value, null, 2));
+  }
+}
+
 async function listTestRuns(workflowId, rawLimit) {
   if (!workflowId) {
     throw new Error("Missing workflow id. Usage: node scripts/n8n.js test-runs WORKFLOW_ID [LIMIT]");
@@ -481,15 +525,37 @@ async function watchTestRun(workflowId, runId, rawIntervalSeconds) {
   }
 }
 
-async function listTestCases(workflowId, runId, rawLimit, printRaw = false) {
+async function listTestCases(workflowId, runId, rawLimit, printRaw = false, printFailures = false) {
   if (!workflowId || !runId) {
-    throw new Error("Usage: node scripts/n8n.js test-cases WORKFLOW_ID RUN_ID [LIMIT]");
+    throw new Error("Usage: node scripts/n8n.js test-cases WORKFLOW_ID RUN_ID [LIMIT] [--raw|--failures]");
   }
   const limit = Math.min(100, Math.max(1, Number.parseInt(rawLimit ?? "100", 10) || 100));
   const query = new URLSearchParams({ limit: String(limit) });
   const result = await api(`/workflows/${encodeURIComponent(workflowId)}/test-runs/${encodeURIComponent(runId)}/test-cases?${query}`);
   if (printRaw) {
     console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (printFailures) {
+    const failures = (result.data ?? result ?? [])
+      .filter((testCase) => testCase.status !== "success" || testCase.outputs?.passed !== 1)
+      .map((testCase) => ({
+        id: testCase.id,
+        executionId: testCase.executionId ?? null,
+        caseId: testCase.inputs?.caseId ?? null,
+        fileName: testCase.inputs?.fileName ?? null,
+        status: testCase.status,
+        correctness: testCase.metrics?.correctness ?? null,
+        chemistryScore: testCase.metrics?.["Chemistry score"] ?? testCase.outputs?.chemistryScore ?? null,
+        chemistryPassed: testCase.outputs?.chemistryPassed ?? null,
+        passed: testCase.outputs?.passed ?? null,
+        judgeScore: testCase.outputs?.judgeScore ?? null,
+        judgeReasoning: testCase.outputs?.judgeReasoning ?? null,
+        errorCode: testCase.errorCode ?? null,
+        errorDetails: testCase.errorDetails ?? null,
+      }));
+    console.log(JSON.stringify({ data: failures, nextCursor: result.nextCursor ?? null }, null, 2));
     return;
   }
 
@@ -643,10 +709,12 @@ function printUsage() {
   node scripts/n8n.js publish WORKFLOW_ID
   node scripts/n8n.js executions WORKFLOW_ID [LIMIT]
   node scripts/n8n.js execution-summary EXECUTION_ID
+  node scripts/n8n.js execution-node EXECUTION_ID NODE_NAME
+  node scripts/n8n.js execution-field EXECUTION_ID FIELD NODE_NAME
   node scripts/n8n.js test-runs WORKFLOW_ID [LIMIT]
   node scripts/n8n.js start-test-run WORKFLOW_ID
   node scripts/n8n.js cancel-test-run WORKFLOW_ID RUN_ID
   node scripts/n8n.js test-run-summary WORKFLOW_ID RUN_ID
   node scripts/n8n.js watch-test-run WORKFLOW_ID RUN_ID [INTERVAL_SECONDS]
-  node scripts/n8n.js test-cases WORKFLOW_ID RUN_ID [LIMIT] [--raw]`);
+  node scripts/n8n.js test-cases WORKFLOW_ID RUN_ID [LIMIT] [--raw|--failures]`);
 }

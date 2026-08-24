@@ -18,6 +18,8 @@ const text = execFileSync("pdftotext", ["-layout", pdfPath, "-"], {
   maxBuffer: 5 * 1024 * 1024,
 });
 const workflow = JSON.parse(readFileSync(path.join(ROOT, "workflows/outlook-certificate-analysis.json"), "utf8"));
+const evaluationCases = JSON.parse(readFileSync(path.join(ROOT, "evaluations/certificate-ground-truth.json"), "utf8"));
+const evaluationCase = evaluationCases.find((entry) => entry.fileName === path.basename(pdfPath));
 const nodeCode = Object.fromEntries(workflow.nodes.map((node) => [node.name, node.parameters?.jsCode ?? ""]));
 
 const failures = [];
@@ -123,8 +125,8 @@ if (/Report Number:\s*2026\s*-\s*102898/i.test(text)) {
     ...baseRow,
     heatNumber: "901972",
     chemicals: { C: 0.043, SI: 0.406, MN: 1.59, P: 0.031, S: 0.021, CR: 17.11, NI: 9.06, CO: 0.249, TI: 0.436, N: 0.01 },
-    yieldStrength02: 255,
-    yieldStrength10: 290,
+    yieldStrength02: 259,
+    yieldStrength10: 293,
     tensileStrength: 564,
     elongation: 50.1,
     dimensions: "133,0 x 14,2 mm",
@@ -140,6 +142,18 @@ if (/Report Number:\s*2026\s*-\s*102898/i.test(text)) {
   if (validatedRows.length !== 2) failures.push(`final validation: expected 2 positions, got ${validatedRows.length}`);
   if (validatedRows[0]?.dimensions !== "193.7 x 22.2 mm") failures.push(`final validation: unexpected first dimensions ${validatedRows[0]?.dimensions}`);
   if (validatedRows[1]?.dimensions !== "133.0 x 14.2 mm") failures.push(`final validation: unexpected second dimensions ${validatedRows[1]?.dimensions}`);
+  if (validatedRows[1]?.yieldStrength02 !== 259) failures.push(`final validation: second yieldStrength02 ${validatedRows[1]?.yieldStrength02} != 259`);
+  if (validatedRows[1]?.yieldStrength10 !== 293) failures.push(`final validation: second yieldStrength10 ${validatedRows[1]?.yieldStrength10} != 293`);
+
+  const reducerDimensions = "219.10 x 7.10 / 88.90 x 4.00 mm";
+  const reducer = await runCodeNode(
+    "Ergebnis validieren und Dokumentenreview vorbereiten",
+    [{ json: { choices: [{ message: { content: JSON.stringify({ results: [{ ...baseRow, heatNumber: "333691", dimensions: reducerDimensions }] }) } }] } }],
+    { "Qualitätsprüfung vorbereiten": [{ json: validationContext }] },
+  );
+  if (reducer[0]?.json?.results?.[0]?.dimensions !== reducerDimensions) {
+    failures.push(`multi-end dimensions: ${reducer[0]?.json?.results?.[0]?.dimensions} != ${reducerDimensions}`);
+  }
 
   const repeatedHeatRows = [baseRow, { ...baseRow, dimensions: "133,0 x 14,2 mm", quantity: 3 }];
   const repeated = await runCodeNode(
@@ -157,7 +171,9 @@ if (/Report Number:\s*2026\s*-\s*102898/i.test(text)) {
   requireMatch("extraction position identity", chunkPrompt, /Item-\/Positionsnummer[\s\S]*positionNumber/);
   requireMatch("normalization repeated-heat position rule", normalizePrompt, /Dieselbe Schmelznummer[\s\S]*jede Position/);
   requireMatch("quality repeated-heat position rule", qualityPrompt, /Gleiche Schmelznummern[\s\S]*getrennte Zeilen/);
-  requireMatch("room-temperature range", normalizePrompt, /20 bis 23 °C/);
+requireMatch("room-temperature range", normalizePrompt, /20 bis 23 °C/);
+requireMatch("approval-certificate exclusion", normalizePrompt, /Zulassungsnummern dürfen es nicht ersetzen/);
+requireMatch("exact mechanical minimum", normalizePrompt, /Mechanische Istwerte niemals runden/);
   requireMatch("piece quantity support", chunkPrompt, /Stück\/Qty\/PCS/);
 
   if (failures.length) {
@@ -199,6 +215,77 @@ if (/Report Number:\s*2026\s*-\s*102898/i.test(text)) {
   }
   console.log("Unicorn composite-certificate source, prompts, JSON repair, and repeated-heat position handling passed.");
   console.log(JSON.stringify(expected, null, 2));
+  process.exit(0);
+}
+
+if (evaluationCase) {
+  const normalizeMarker = (value) => String(value ?? "").normalize("NFKD").replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+  const normalizedText = normalizeMarker(text);
+  if (text.trim().length >= 50) {
+    for (const marker of [
+      evaluationCase.expected.certificateNumber,
+      evaluationCase.expected.customerOrderNumber,
+      ...evaluationCase.expected.positions.map((position) => position.heatNumber),
+    ].filter(Boolean)) {
+      if (!normalizedText.includes(normalizeMarker(marker))) failures.push(`source marker missing: ${marker}`);
+    }
+  }
+
+  const scalar = (value) => Array.isArray(value) ? Math.min(...value) : value;
+  const candidateRows = evaluationCase.expected.positions.map((position) => ({
+    heatNumber: position.heatNumber,
+    chemicals: structuredClone(position.chemicals ?? {}),
+    yieldStrength02: position.yieldStrength02 === undefined ? -1 : scalar(position.yieldStrength02),
+    yieldStrength10: position.yieldStrength10 === undefined ? -1 : scalar(position.yieldStrength10),
+    tensileStrength: position.tensileStrength === undefined ? -1 : scalar(position.tensileStrength),
+    elongation: position.elongation === undefined ? -1 : scalar(position.elongation),
+    certificateNumber: evaluationCase.expected.certificateNumber,
+    rawMaterialCertificate: evaluationCase.expected.rawMaterialCertificate ?? "-1",
+    quantity: position.quantity,
+    creditor: evaluationCase.expected.creditor ?? "-1",
+    product: position.product ?? "-1",
+    humanRequired: false,
+    customerOrderNumber: evaluationCase.expected.customerOrderNumber,
+    dimensions: position.dimensions ?? "-1",
+    werkstoff1: position.material ?? "-1",
+    werkstoff2: "-1",
+    werkstoff3: "-1",
+    werkstoff4: "-1",
+    werkstoff5: "-1",
+    ...Object.fromEntries(Array.from({ length: 5 }, (_, index) => [`norm${index + 1}`, position.standards?.[index] ?? "-1"])),
+  }));
+  const validationContext = {
+    correlationKey: evaluationCase.correlationKey,
+    replyMailId: `evaluation:${evaluationCase.caseId}`,
+    pair: {
+      certificate: { mineruEndpoint: "local-regression", mineruModel: "pdftotext-layout", mailId: `evaluation:${evaluationCase.caseId}`, subject: evaluationCase.subject, fileName: evaluationCase.fileName },
+      additionalInfo: null,
+    },
+    orderData: { poNumber: evaluationCase.correlationKey },
+  };
+  const validated = await runCodeNode(
+    "Ergebnis validieren und Dokumentenreview vorbereiten",
+    [{ json: { choices: [{ message: { content: JSON.stringify({ results: candidateRows }) } }] } }],
+    { "Qualitätsprüfung vorbereiten": [{ json: validationContext }] },
+  );
+  const scored = await runCodeNode(
+    "Evaluation deterministisch bewerten",
+    [{ json: {} }],
+    {
+      "Ergebnis validieren und Dokumentenreview vorbereiten": validated,
+      "When fetching a dataset row": [{ json: { expectedAnswer: JSON.stringify(evaluationCase.expected) } }],
+    },
+  );
+  if (scored[0]?.json?.passed !== 1 || scored[0]?.json?.chemistryPassed !== 1 || scored[0]?.json?.chemistryScore !== 1) {
+    failures.push(`deterministic evaluation: ${scored[0]?.json?.reasoning}`);
+  }
+  if (failures.length) {
+    console.error(`Certificate regression failed (${failures.length}):`);
+    for (const failure of failures) console.error(`- ${failure}`);
+    process.exit(1);
+  }
+  console.log(`${evaluationCase.caseId}: source preflight, scalar policy, normalization, and deterministic scoring passed.`);
+  if (text.trim().length < 50) console.log("Source PDF requires the live MinerU/OCR path; local text-marker checks were skipped.");
   process.exit(0);
 }
 
@@ -290,7 +377,7 @@ const normalizePrompt = nodeCode["Belege sammeln und Normalisierung bauen"];
 const qualityPrompt = nodeCode["Qualitätsprüfung vorbereiten"];
 for (const [label, code] of [["extraction prompt", chunkPrompt], ["normalization prompt", normalizePrompt], ["quality prompt", qualityPrompt]]) {
   requireMatch(`${label} H rule`, code, /H\/Heat/i);
-  requireMatch(`${label} P exclusion`, code, /(?:niemals|keine)\s+P\/?-?Product|keine\s+P-?\/Product/i);
+  requireMatch(`${label} P exclusion`, code, /(?:niemals|keine)\s+P\/?-?Product|keine\s+P-?\/Product|nie\s+aus[\s\S]{0,40}P\/Product/i);
   requireMatch(`${label} X100 example`, code, /18\/X100\s*=\s*0\.18|raw 18 unter X 100 ergibt 0\.18/i);
   requireMatch(`${label} X1000 example`, code, /13\/X1000\s*=\s*0\.013|raw 13 unter X 1000 ergibt 0\.013/i);
   requireMatch(`${label} X10000 example`, code, /92\/X10000\s*=\s*0\.0092|raw 92 unter X 10000 ergibt 0\.0092/i);
