@@ -33,7 +33,7 @@
     "expected": {
       "certificateNumber": "26030318",
       "customerOrderNumber": "PO-26-RFS003506",
-      "positions": [{ "heatNumber": "333691", "quantity": 2, "product": "Eccentric reducer DIN EN 10253-2 Type A", "dimensions": "219.10 x 7.10 / 88.90 x 4.00 mm", "material": "P235GH", "yieldStrength02": 306, "tensileStrength": 447, "elongation": 35, "chemicals": { "C": 0.14, "SI": 0.2, "MN": 0.56, "P": 0.012, "S": 0.001, "AL": 0.027, "CU": 0.04, "CR": 0.07, "MO": 0.02, "NI": 0.06, "N": 0.002, "V": 0.001, "NB": 0.001, "Cr+Cu+Mo+Ni": 0.19 } }]
+      "positions": [{ "heatNumber": "333691", "quantity": 2, "product": "Eccentric reducer DIN EN 10253-2 Type A", "dimensions": "219.10 x 7.10 / 88.90 x 4.00 mm", "material": "P235GH", "yieldStrength02": 306, "tensileStrength": 447, "elongation": 35, "chemicals": { "C": 0.14, "SI": 0.2, "MN": 0.56, "P": 0.012, "S": 0.001, "AL": 0.027, "CU": 0.04, "CR": 0.07, "MO": 0.02, "NI": 0.06, "TI": 0.002, "V": 0.001, "NB": 0.001, "N": 0.0072, "Cr+Cu+Mo+Ni": 0.19 } }]
     }
   },
   {

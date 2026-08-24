@@ -456,6 +456,7 @@ const deckTraceRule = "Fülle deckSelection mit documentRole=DECK, sourceBlockIn
 const headerLabelRule = "Ordne Kopfwerte ausschließlich nach ihrem Etikett zu: Inspection Certificate No./Abnahmeprüfzeugnis-Nr. ist certificateNumber; Bestell-Nr./Customer Order/P.O. ist customerOrderNumber. Auftrags-Nr./Works Order, Supplier Order, PU- und AB-Vorgangsnummern sind keine Kundenbestellung und keine Zeugnisnummer, sofern sie nicht ausdrücklich genau so beschriftet sind.";
 const legacyMaterialStandardRule = "Werkstoffspezifikationen, die in der Material-/B02-Zeile stehen, bleiben zusätzlich eigenständige Normen und stehen vor allgemeinen Prüfanforderungen. Beispiel: 'F316/F316L - ASTM A 182M-24 / ASME SA-182M-23' ergibt werkstoff=F316/F316L sowie norm1=ASTM A182M-24 und norm2=ASME SA-182M-23.";
 const materialStandardRule = "Werkstoffspezifikationen, die in der Material-/B02-Zeile stehen, bleiben zusätzlich eigenständige Normen und stehen vor allgemeinen Prüfanforderungen. Beispiel: F316/F316L - ASTM A 182M-24 / ASME SA-182M-23 ergibt werkstoff=F316/F316L sowie norm1=ASTM A182M-24 und norm2=ASME SA-182M-23.";
+const chemistryTraceRule = "Erhalte für jeden Chemiewert zusätzlich columnHeader und scaleSourceQuote aus derselben Tabelle. Niemals eine Skala aus einer benachbarten Spaltengruppe übernehmen; bei colspan gilt die Skala nur für die von ihr überspannten Elementspalten.";
 const removePromptRule = (node, rule) => {
   if (!node) return;
   node.parameters.jsCode = node.parameters.jsCode.replace("  '" + rule + "',\n", "");
@@ -519,6 +520,11 @@ appendPromptRule(
   "  '" + headerLabelRule + "',",
   materialStandardRule,
 );
+appendPromptRule(
+  workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen"),
+  "  'Skalierungsbeispiele: raw 18 unter X 100 ergibt 0.18; raw 13 unter X 1000 ergibt 0.013; raw 92 unter X 10000 ergibt 0.0092. Gib rawValue, scale, value und analysisType aus.',",
+  chemistryTraceRule,
+);
 
 const evidencePreparation = workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen");
 if (evidencePreparation) {
@@ -526,6 +532,10 @@ if (evidencePreparation) {
     .replace(
       "  certificate: {\n    certificateNumber:",
       "  certificate: {\n    documentRole: { value: 'DECK|RAW_MATERIAL|APPROVAL|OTHER|UNKNOWN', sourceQuote: 'string|null' },\n    sourcePage: { value: 'string|number|null', sourceQuote: 'string|null' },\n    deckIndicators: { customerOrder: 'boolean', finishedProduct: 'boolean', finishedQuantity: 'boolean', finishedDimensions: 'boolean' },\n    certificateNumber:"
+    )
+    .replace(
+      "    chemistry: [{ element: 'string', analysisType: 'H|P', rawValue: 'number|string', scale: 'number', value: 'number', sourceQuote: 'string' }],",
+      "    chemistry: [{ element: 'string', analysisType: 'H|P', rawValue: 'number|string', scale: 'number', value: 'number', columnHeader: 'string', scaleSourceQuote: 'string', sourceQuote: 'string' }],"
     )
     .replace(
       "    tensileTests: [{ temperatureC: 'number|null', yieldStrength02: 'number|null', yieldStrength10: 'number|null', tensileStrength: 'number|null', elongationA5: 'number|null', elongationA4: 'number|null', sourceQuote: 'string' }]",
@@ -585,6 +595,170 @@ if (finalValidation) {
   const deterministicCorrectionCode = String.raw`const evidenceValue = (value) => value && typeof value === 'object' && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, 'value') ? value.value : value;
 const canonicalEvidence = (value) => String(evidenceValue(value) ?? '').normalize('NFKD').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
 const evidenceNumber = (value) => { const raw = evidenceValue(value); if (raw === null || raw === undefined || String(raw).trim() === '') return null; const number = Number(String(raw).trim().replace(',', '.')); return Number.isFinite(number) && number >= 0 ? number : null; };
+const chemicalHeaderMap = {
+  C: 'C', SI: 'SI', S: 'S', P: 'P', SN: 'SN', MN: 'MN', CR: 'CR', NI: 'NI', MO: 'MO', TI: 'TI', CO: 'CO', CU: 'CU', N: 'N', AL: 'AL', AI: 'AL', V: 'V', NB: 'NB', B: 'B', ZR: 'Zr', W: 'W', SB: 'Sb', AS: 'As', F1: 'AL/N',
+  ALN: 'AL/N', NBV25: 'Nb+(V2,5)', NBVTI: 'Nb+V+Ti', MNC: 'Mn/C', CEV: 'CEV', VNB: 'V+NB', NICU: 'Ni+Cu', CUNICRMOV: 'Cu+Ni+Cr+Mo+V', CRCUMONI: 'Cr+Cu+Mo+Ni', CUMO: 'Cu+Mo',
+};
+const canonicalChemicalHeader = (value) => chemicalHeaderMap[canonicalEvidence(value)] ?? null;
+const decodeHtmlCell = (value) => String(value ?? '')
+  .replace(/<img\b[^>]*>/gi, ' ')
+  .replace(/<br\s*\/?\s*>/gi, ' ')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
+  .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+  .replace(/&nbsp;|&#160;/gi, ' ')
+  .replace(/&amp;/gi, '&')
+  .replace(/&lt;/gi, '<')
+  .replace(/&gt;/gi, '>')
+  .replace(/&quot;/gi, '"')
+  .replace(/&#x27;|&apos;/gi, "'")
+  .replace(/\s+/g, ' ')
+  .trim();
+const strictChemicalNumber = (value) => {
+  const text = decodeHtmlCell(value).replace(/^[<>≈~]\s*/, '').replace(/\s*%$/, '').replace(/\s+/g, '');
+  if (!/^-?\d+(?:[.,]\d+)?$/.test(text)) return null;
+  const number = Number(text.replace(',', '.'));
+  return Number.isFinite(number) && number >= 0 ? number : null;
+};
+const isActualAnalysisMarker = (value) => {
+  const key = canonicalEvidence(value);
+  return Boolean(key) && key.replace(/HEAT|ACTUAL|ACTUEL|IST|REP|CER|H/g, '') === '';
+};
+const expandHtmlTable = (tableHtml) => {
+  const grid = [];
+  const spans = new Map();
+  for (const rowMatch of tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const row = [];
+    let column = 0;
+    const consumeSpans = () => {
+      while (spans.has(column)) {
+        const span = spans.get(column);
+        row[column] = span.value;
+        span.remaining--;
+        if (span.remaining <= 0) spans.delete(column);
+        column++;
+      }
+    };
+    for (const cellMatch of rowMatch[1].matchAll(/<(?:td|th)\b([^>]*)>([\s\S]*?)<\/(?:td|th)>/gi)) {
+      consumeSpans();
+      const attributes = cellMatch[1];
+      const value = decodeHtmlCell(cellMatch[2]);
+      const colspan = Math.max(1, Number(attributes.match(/\bcolspan\s*=\s*["']?(\d+)/i)?.[1] ?? 1));
+      const rowspan = Math.max(1, Number(attributes.match(/\browspan\s*=\s*["']?(\d+)/i)?.[1] ?? 1));
+      for (let offset = 0; offset < colspan; offset++) {
+        row[column + offset] = value;
+        if (rowspan > 1) spans.set(column + offset, { value, remaining: rowspan - 1 });
+      }
+      column += colspan;
+    }
+    const laterSpanColumns = [...spans.keys()].filter((spanColumn) => spanColumn >= column).sort((left, right) => left - right);
+    for (const spanColumn of laterSpanColumns) {
+      while (column < spanColumn) column++;
+      consumeSpans();
+    }
+    grid.push(row);
+  }
+  return grid;
+};
+const labeledHeatKeys = (value) => {
+  const text = decodeHtmlCell(value);
+  const keys = [];
+  for (const labelMatch of text.matchAll(/(?:HEAT[-\s]*(?:NO(?:\.|\b)|NUMBER|N[°º])|SCHMELZEN?[-\s]*(?:NR(?:\.|\b)|NO(?:\.|\b)|N[°º])|CHARGEN[°º]|CHARGEN?[-\s]*(?:NR(?:\.|\b)|NO(?:\.|\b)|N[°º]))/gi)) {
+    const following = text.slice(labelMatch.index + labelMatch[0].length, labelMatch.index + labelMatch[0].length + 120);
+    const token = [...following.matchAll(/[A-Z0-9][A-Z0-9./-]*/gi)]
+      .map((match) => match[0])
+      .find((candidate) => { const key = canonicalEvidence(candidate); return key.length >= 5 && /\d/.test(key); });
+    const key = canonicalEvidence(token);
+    if (key) keys.push(key);
+  }
+  return keys;
+};
+const sourceChemistryForHeat = (sourceText, heatKey) => {
+  const chemistry = {};
+  const source = String(sourceText ?? '');
+  const tables = [...source.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)];
+  for (const tableMatch of tables) {
+    const tableHtml = tableMatch[0];
+    const vicinity = source.slice(Math.max(0, tableMatch.index - 4000), tableMatch.index) + tableHtml;
+    const vicinityKey = canonicalEvidence(decodeHtmlCell(vicinity));
+    if (!/(CHEM|COMPOSITION|ANALY|ZUSAMMENSETZUNG)/.test(vicinityKey)) continue;
+    const tableLabeledHeats = labeledHeatKeys(tableHtml);
+    const grid = expandHtmlTable(tableHtml);
+    if (!grid.length) continue;
+    let headerIndex = -1;
+    let headerElements = [];
+    for (let rowIndex = 0; rowIndex < grid.length; rowIndex++) {
+      const elements = grid[rowIndex].map(canonicalChemicalHeader);
+      if (elements.filter(Boolean).length >= 3 && elements.filter(Boolean).length > headerElements.filter(Boolean).length) {
+        headerIndex = rowIndex;
+        headerElements = elements;
+      }
+    }
+    if (headerIndex < 0) continue;
+    const elementColumns = headerElements.map((element, column) => element ? { element, column } : null).filter(Boolean);
+    const firstElementColumn = Math.min(...elementColumns.map((entry) => entry.column));
+    const scaleByColumn = new Map();
+    for (const { column } of elementColumns) {
+      let scale = 1;
+      for (let rowIndex = headerIndex - 1; rowIndex >= 0; rowIndex--) {
+        const match = decodeHtmlCell(grid[rowIndex][column]).match(/^X\s*(10000|1000|100)$/i);
+        if (match) { scale = Number(match[1]); break; }
+      }
+      scaleByColumn.set(column, scale);
+    }
+    const tableHasHeat = grid.some((row) => row.some((cell) => canonicalEvidence(cell) === heatKey));
+    if (tableLabeledHeats.length && !tableLabeledHeats.includes(heatKey) && !tableHasHeat) continue;
+    if (!tableLabeledHeats.length && !tableHasHeat) {
+      const precedingHeatKeys = labeledHeatKeys(source.slice(Math.max(0, tableMatch.index - 4000), tableMatch.index));
+      if (precedingHeatKeys.length && precedingHeatKeys.at(-1) !== heatKey) continue;
+    }
+    const directAnalysisContext = /(HEATCHEMICALANALYSIS|SCHMELZANALYSE|CHARGENANALYSE|COMPOSITIONOFCAST|CHEMCOMPOSITIONOFCAST)/.test(vicinityKey);
+    for (let rowIndex = headerIndex + 1; rowIndex < grid.length; rowIndex++) {
+      const row = grid[rowIndex];
+      const metadataCells = row.slice(0, firstElementColumn);
+      const metadataKey = canonicalEvidence(metadataCells.join(' '));
+      const rowHasHeat = row.some((cell) => canonicalEvidence(cell) === heatKey);
+      const hasActualMarker = metadataCells.some(isActualAnalysisMarker);
+      const hasProductMarker = metadataCells.some((cell) => ['P', 'PRODUCT', 'PRODUKT'].includes(canonicalEvidence(cell)));
+      const isLimitRow = /(?:MAX|MIN|REQUIREMENT|ANFORDERUNG|SOLL)/.test(metadataKey);
+      const values = elementColumns.map(({ element, column }) => ({ element, number: strictChemicalNumber(row[column]), scale: scaleByColumn.get(column) ?? 1 })).filter((entry) => entry.number !== null);
+      const qualifies = !hasProductMarker && !isLimitRow && values.length >= 3 && (rowHasHeat || hasActualMarker || (tableHasHeat && directAnalysisContext));
+      if (!qualifies) continue;
+      for (const { element, number, scale } of values) chemistry[element] = number / scale;
+      break;
+    }
+  }
+  return chemistry;
+};
+const evidenceChemistryForHeat = (chunks, heatKey) => {
+  const chemistry = {};
+  for (const chunk of chunks) {
+    for (const heat of Array.isArray(chunk?.heats) ? chunk.heats : []) {
+      if (canonicalEvidence(heat?.heatNumber) !== heatKey) continue;
+      for (const entry of Array.isArray(heat.chemistry) ? heat.chemistry : []) {
+        if (!isActualAnalysisMarker(entry.analysisType)) continue;
+        const element = canonicalChemicalHeader(entry.element);
+        if (!element) continue;
+        const rawValue = evidenceNumber(entry.rawValue);
+        const scale = evidenceNumber(entry.scale);
+        const declaredValue = evidenceNumber(entry.value);
+        const value = rawValue !== null && [1, 10, 100, 1000, 10000].includes(scale) ? rawValue / scale : declaredValue;
+        if (value !== null) chemistry[element] = value;
+      }
+    }
+  }
+  return chemistry;
+};
+const mergeCanonicalChemistry = (source, ...corrections) => {
+  const merged = { ...(source && typeof source === 'object' && !Array.isArray(source) ? source : {}) };
+  for (const correction of corrections) {
+    for (const [element, value] of Object.entries(correction ?? {})) {
+      for (const existing of Object.keys(merged)) if (canonicalChemicalHeader(existing) === element) delete merged[existing];
+      merged[element] = value;
+    }
+  }
+  return merged;
+};
 const gaugeType = (test) => {
   const source = [test.gaugeLengthType, test.gaugeLength, test.elongationType, test.elongationColumnType, test.columnHeaders, test.sourceQuote].map(evidenceValue).join(' ').toUpperCase().replace(/\s+/g, ' ');
   if (/\b(?:A5|5D)\b|L0\s*=\s*5\s*D/.test(source)) return 'A5';
@@ -636,6 +810,23 @@ const repairCollapsedPairedTests = (inputTests) => {
     quoteTests.forEach((test) => consumed.add(test));
   }
   return inputTests.filter((test) => !consumed.has(test)).concat(repaired);
+};
+const sourcePreferredPairedElongations = (sourceText) => {
+  const source = String(sourceText ?? '');
+  for (const tableMatch of source.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)) {
+    const tableKey = canonicalEvidence(decodeHtmlCell(tableMatch[0]));
+    if (!tableKey.includes('MECHANICAL') || !tableKey.includes('ELONGATION')) continue;
+    for (const row of expandHtmlTable(tableMatch[0])) {
+      for (const cell of row) {
+        const text = decodeHtmlCell(cell);
+        const match = text.match(/^(\d{2,3}(?:[.,]\d+)?)\s*\/\s*(\d{2,3}[.,]\d{1,2})(\d{2,3}[.,]\d+)\s*\/\s*(\d{2,3}(?:[.,]\d+)?)$/);
+        if (!match) continue;
+        const preferred = [strictChemicalNumber(match[1]), strictChemicalNumber(match[3])].filter((value) => value !== null);
+        if (preferred.length === 2) return preferred;
+      }
+    }
+  }
+  return [];
 };
 const correctCertificateRow = (sourceRow) => {
   const row = { ...sourceRow };
@@ -715,6 +906,10 @@ const correctCertificateRow = (sourceRow) => {
     for (let index = 0; index < 5; index++) row['norm' + (index + 1)] = mergedNorms[index] ?? '-1';
   }
 
+  const evidenceChemistry = evidenceChemistryForHeat(chunks, heatKey);
+  const sourceChemistry = sourceChemistryForHeat(criticalSource, heatKey);
+  row.chemicals = mergeCanonicalChemistry(row.chemicals, evidenceChemistry, sourceChemistry);
+
   const modelTests = Array.isArray(row.mechanicalSelection?.tests) ? row.mechanicalSelection.tests : [];
   const evidenceTests = chunks.flatMap((chunk, chunkIndex) => (Array.isArray(chunk?.heats) ? chunk.heats : [])
     .filter((heat) => canonicalEvidence(heat?.heatNumber) === heatKey)
@@ -746,7 +941,7 @@ const correctCertificateRow = (sourceRow) => {
   if (tests.length) {
     const groups = new Map();
     for (const test of tests) {
-      const group = String(test._chunkIndex ?? 'MODEL') + ':' + (canonicalEvidence(test.comparableGroupId ?? test.testBlockId) || 'UNKNOWN');
+      const group = String(test._chunkIndex ?? 'MODEL') + ':' + (canonicalEvidence(test.testBlockId ?? test.comparableGroupId) || 'UNKNOWN');
       if (!groups.has(group)) groups.set(group, []);
       groups.get(group).push(test);
     }
@@ -776,6 +971,8 @@ const correctCertificateRow = (sourceRow) => {
     const yieldStrength10 = fieldMinimum(explicitRp10Tests, 'yieldStrength10');
     if (yieldStrength10 !== null) row.yieldStrength10 = yieldStrength10;
   }
+  const sourcePreferredElongations = sourcePreferredPairedElongations(criticalSource);
+  if (sourcePreferredElongations.length) row.elongation = Math.min(...sourcePreferredElongations);
   const yield02 = evidenceNumber(row.yieldStrength02);
   const yield10 = evidenceNumber(row.yieldStrength10);
   if (yield02 !== null && yield10 !== null && yield10 < yield02) {
@@ -814,6 +1011,10 @@ if (normalizationPreparation) {
   const legacyTraceSchema = "    deckSelection: { documentRole: 'DECK', sourceBlockIndex: 'number', sourcePage: 'string|number|null', selectionReason: 'string', certificateNumber: 'string', customerOrderNumber: 'string', manufacturer: 'string', product: 'string', dimensions: 'string', material: 'string', quantity: 'number' },\n    mechanicalSelection: { selectedComparableGroupId: 'string', gaugeLengthType: 'A5|5D|A4|2IN|OTHER|UNKNOWN', selectionReason: 'string', tests: [{ comparableGroupId: 'string', testBlockId: 'string', specimenId: 'string|null', specimenLocation: 'string|null', gaugeLengthType: 'A5|5D|A4|2IN|OTHER|UNKNOWN', temperatureC: 'number|null', columnHeaders: 'string', yieldStrength02: 'number|null', yieldStrength10: 'number|null', yieldStrength10Explicit: 'boolean', tensileStrength: 'number|null', elongation: 'number|null', sourceQuote: 'string' }] },\n";
   const traceSchema = "    deckSelection: { documentRole: 'DECK', sourceBlockIndex: 'number', sourcePage: 'string|number|null', selectionReason: 'string', certificateNumber: 'string', customerOrderNumber: 'string', manufacturer: 'string', product: 'string', dimensions: 'string', material: 'string', quantity: 'number' },\n    mechanicalSelection: { selectedComparableGroupId: 'string', gaugeLengthType: 'A5|5D|A4|2IN|OTHER|UNKNOWN', selectionReason: 'string', tests: [{ comparableGroupId: 'string', testBlockId: 'string', specimenId: 'string|null', specimenLocation: 'string|null', gaugeLengthType: 'A5|5D|A4|2IN|OTHER|UNKNOWN', elongationColumnType: 'A5|5D|A4|2IN|FS|PRIMARY|SECONDARY|UNKNOWN', isPreferredElongationColumn: 'boolean', temperatureC: 'number|null', columnHeaders: 'string', yieldStrength02: 'number|null', yieldStrength10: 'number|null', yieldStrength10Explicit: 'boolean', tensileStrength: 'number|null', elongation: 'number|null', sourceQuote: 'string' }] },\n";
   normalizationPreparation.parameters.jsCode = normalizationPreparation.parameters.jsCode
+    .replace(
+      "const sourceText = String(source.pair.certificate?.markdown ?? '').replace(/\\r\\n?/g, '\\n');\nconst criticalSource = sourceText.slice(0, 60000);",
+      "const sourceText = String(source.pair.certificate?.markdown ?? '').replace(/\\r\\n?/g, '\\n');\nconst sourceTextWithoutEmbeddedImages = sourceText\n  .replace(/<img\\b[^>]*>/gi, '[embedded image omitted]')\n  .replace(/data:image\\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, '[embedded image omitted]');\nconst criticalSource = sourceTextWithoutEmbeddedImages.slice(0, 90000);"
+    )
     .replaceAll(legacyTraceSchema, "")
     .replaceAll(traceSchema, "")
     .replace(
@@ -902,10 +1103,29 @@ appendPromptRule(qualityPreparation, "  '" + headerLabelRule + "',", materialSta
 
 const mineruErrorPreparation = workflow.nodes.find((node) => node.name === "MinerU-Fehler vorbereiten");
 if (mineruErrorPreparation) {
-  mineruErrorPreparation.parameters.jsCode = mineruErrorPreparation.parameters.jsCode.replace(
-    "const original = $('Einordnung lesen').first().json;",
-    "let original = {};\ntry { original = $('Einordnung lesen').first().json; } catch {}\nif (!original.mailId) { try { original = $('Evaluations-PDF vorbereiten').first().json; } catch {} }"
-  );
+  mineruErrorPreparation.parameters.jsCode = String.raw`const status = $input.first().json ?? {};
+let original = {};
+try { original = $('Einordnung lesen').first().json; } catch {}
+if (!original.mailId) { try { original = $('Evaluations-PDF vorbereiten').first().json; } catch {} }
+const detail = status.extraction_error ?? status.error ?? status.message ?? 'Unbekannter Fehler';
+if (original.evaluationRun) {
+  const state = $getWorkflowStaticData('global');
+  state.mineruEvaluationRetries ??= {};
+  const now = Date.now();
+  for (const [key, entry] of Object.entries(state.mineruEvaluationRetries)) {
+    if (now - Number(entry?.updatedAt ?? 0) > 24 * 60 * 60 * 1000) delete state.mineruEvaluationRetries[key];
+  }
+  const retryKey = String($execution?.id ?? original.caseId ?? original.mailId);
+  const attempt = Number(state.mineruEvaluationRetries[retryKey]?.attempt ?? 0) + 1;
+  state.mineruEvaluationRetries[retryKey] = { attempt, updatedAt: now };
+  if (attempt >= 3) {
+    delete state.mineruEvaluationRetries[retryKey];
+    throw new Error('MinerU extraction failed during evaluation after 3 attempts: ' + String(detail));
+  }
+  const uploadItem = $('PDF-Upload vorbereiten').first();
+  return [{ json: { ...uploadItem.json, mineruEvaluationRetry: true, mineruEvaluationRetryAttempt: attempt }, binary: uploadItem.binary }];
+}
+return [{ json: { replyMailId: original.mailId, replyText: 'Die Zertifikatsextraktion mit MinerU ist fehlgeschlagen.\n\n' + String(detail) } }];`;
 }
 
 for (const [name, tries, delay] of [
@@ -931,6 +1151,37 @@ function upsertNode(definition) {
   if (current) Object.assign(current, definition);
   else workflow.nodes.push(definition);
 }
+
+upsertNode({
+  parameters: {
+    conditions: {
+      options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 },
+      conditions: [{ id: "0b62413a-42a2-492f-9382-d7e830449ca9", leftValue: "={{ $json.mineruEvaluationRetry === true }}", rightValue: true, operator: { type: "boolean", operation: "true", singleValue: true } }],
+      combinator: "and"
+    },
+    options: {}
+  },
+  id: "343ac9dc-af48-441a-9e07-7270d83c8a91",
+  name: "MinerU-Evaluierung erneut versuchen?",
+  type: "n8n-nodes-base.if",
+  typeVersion: 2.2,
+  position: [2864, -80]
+});
+upsertNode({
+  parameters: { amount: 15 },
+  id: "93b77478-038f-4afb-a0f7-03524d7c83fd",
+  name: "Vor MinerU-Evaluierungsretry warten",
+  type: "n8n-nodes-base.wait",
+  typeVersion: 1.1,
+  position: [3120, -80],
+  webhookId: "664261aa-d173-4735-8c87-f335aeab41db"
+});
+workflow.connections["MinerU-Fehler vorbereiten"] = { main: [[{ node: "MinerU-Evaluierung erneut versuchen?", type: "main", index: 0 }]] };
+workflow.connections["MinerU-Evaluierung erneut versuchen?"] = { main: [
+  [{ node: "Vor MinerU-Evaluierungsretry warten", type: "main", index: 0 }],
+  [{ node: "Letzter MinerU-Versuch?", type: "main", index: 0 }]
+] };
+workflow.connections["Vor MinerU-Evaluierungsretry warten"] = { main: [[{ node: "PDF bei MinerU einreichen", type: "main", index: 0 }]] };
 
 upsertNode({
   parameters: {

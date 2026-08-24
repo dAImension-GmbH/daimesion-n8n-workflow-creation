@@ -154,14 +154,90 @@ const silcotub = await validate({
     tests: [
       { comparableGroupId: "UPPER-2IN", specimenId: "Q5115", gaugeLengthType: "2IN", isPrimaryAcceptanceBlock: true, yieldStrength02: 512, tensileStrength: 679, elongation: 37.5 },
       { comparableGroupId: "UPPER-2IN", specimenId: "Q5116", gaugeLengthType: "2IN", isPrimaryAcceptanceBlock: true, yieldStrength02: 511, tensileStrength: 683, elongation: 40 },
-      { comparableGroupId: "LOWER-5D", specimenId: "Q5113", gaugeLengthType: "5D", isPrimaryAcceptanceBlock: false, yieldStrength02: 512, tensileStrength: 679, elongation: 26 },
-      { comparableGroupId: "LOWER-5D", specimenId: "Q5114", gaugeLengthType: "5D", isPrimaryAcceptanceBlock: false, yieldStrength02: 509, tensileStrength: 679, elongation: 28 },
+      { comparableGroupId: "block2-test1", testBlockId: "block2", specimenId: "Q5113", gaugeLengthType: "5D", isPrimaryAcceptanceBlock: false, yieldStrength02: 512, tensileStrength: 679, elongation: 26 },
+      { comparableGroupId: "block2-test2", testBlockId: "block2", specimenId: "Q5114", gaugeLengthType: "5D", isPrimaryAcceptanceBlock: false, yieldStrength02: 509, tensileStrength: 679, elongation: 28 },
     ],
   },
 });
 assertEqual("Silcotub yieldStrength02", silcotub.yieldStrength02, 509);
 assertEqual("Silcotub tensileStrength", silcotub.tensileStrength, 679);
 assertEqual("Silcotub elongation", silcotub.elongation, 26);
+
+const silcotubChemistryTable = [
+  "CHEMICAL COMPOSITION / CHEMISCHE ZUSAMMENSETZUNG",
+  '<table><tr><td rowspan="5" colspan="4"></td><td colspan="21">Composition %</td></tr>',
+  '<tr><td colspan="9">X 100</td><td colspan="7">X 1000</td><td colspan="5">X 10000</td></tr>',
+  '<tr><td>C</td><td>Mn</td><td>Si</td><td>Ni</td><td>Cr</td><td>Mo</td><td>V</td><td>Cu</td><td>F1</td><td>P</td><td>S</td><td>Sn</td><td>Al</td><td>Ti</td><td>Nb</td><td>As</td><td>N</td><td>B</td><td>Sb</td><td>W</td><td>Zr</td></tr>',
+  '<tr><td rowspan="2">H Max Min</td><td>12</td><td>50</td><td>40</td><td>20</td><td>950</td><td>105</td><td>25</td><td>10</td><td>--</td><td>20</td><td>5</td><td>10</td><td>20</td><td>10</td><td>100</td><td>10</td><td>700</td><td>10</td><td>30</td><td>500</td><td>100</td></tr>',
+  '<tr><td>8</td><td>30</td><td>20</td><td>--</td><td>800</td><td>85</td><td>18</td><td>--</td><td>400</td><td>--</td><td>--</td><td>--</td><td>--</td><td>--</td><td>60</td><td>--</td><td>350</td><td>--</td><td>--</td><td>--</td><td>--</td></tr>',
+  '<tr><td rowspan="2">Heat N°</td><td rowspan="2">Sample N°</td><td rowspan="2">Lot N°</td><td rowspan="2">P Max Min</td><td>12</td><td>50</td><td>40</td><td>20</td><td>950</td><td>105</td><td>25</td><td>10</td><td>--</td><td>20</td><td>5</td><td>10</td><td>20</td><td>10</td><td>100</td><td>10</td><td>700</td><td>10</td><td>30</td><td>500</td><td>100</td></tr>',
+  '<tr><td>8</td><td>30</td><td>20</td><td>--</td><td>800</td><td>85</td><td>18</td><td>--</td><td>400</td><td>--</td><td>--</td><td>--</td><td>--</td><td>--</td><td>60</td><td>--</td><td>350</td><td>--</td><td>--</td><td>--</td><td>--</td></tr>',
+  '<tr><td>938166</td><td></td><td></td><td>H</td><td>11</td><td>40</td><td>28</td><td>8</td><td>862</td><td>90</td><td>20</td><td>7</td><td>980</td><td>12</td><td>3</td><td>4</td><td>6</td><td>1</td><td>66</td><td>5</td><td>588</td><td>3</td><td>18</td><td>3</td><td>26</td></tr>',
+  '<tr><td>938166</td><td>Q5113</td><td>8</td><td>P</td><td>9</td><td>41</td><td>27</td><td>8</td><td>872</td><td>92</td><td>21</td><td>7</td><td>535.5</td><td>11</td><td>1</td><td>7</td><td>11</td><td>2</td><td>68</td><td>6</td><td>589</td><td>4</td><td>15</td><td>65</td><td>28</td></tr></table>',
+].join("\n");
+const silcotubChemistry = await validate({
+  ...baseRow,
+  heatNumber: "938166",
+  chemicals: { C: 0.11, N: 0.0588, B: 0.003, Sb: 0.018, W: 0.003, Zr: 0.026 },
+}, {
+  criticalSource: silcotubChemistryTable,
+  evidence: { chunks: [{ heats: [{ heatNumber: { value: "938166" }, chemistry: [
+    { element: "N", analysisType: "H", rawValue: 588, scale: 10000, value: 0.0588 },
+    { element: "B", analysisType: "H", rawValue: 3, scale: 1000, value: 0.003 },
+    { element: "Sb", analysisType: "H", rawValue: 18, scale: 1000, value: 0.018 },
+    { element: "W", analysisType: "H", rawValue: 3, scale: 1000, value: 0.003 },
+    { element: "Zr", analysisType: "H", rawValue: 26, scale: 1000, value: 0.026 },
+  ] }] }] },
+});
+for (const [element, expected] of Object.entries({ C: 0.11, MN: 0.4, SI: 0.28, N: 0.0588, B: 0.0003, Sb: 0.0018, W: 0.0003, Zr: 0.0026 })) {
+  assertEqual("Silcotub chemistry " + element, silcotubChemistry.chemicals[element], expected);
+}
+
+const starofitChemistryTables = [
+  "Chargen-Analyse (aus Vormaterialzeugnis) / Chem. composition of cast",
+  "<table><tr><td>Ident Nr.</td><td>Charge Nr.</td><td>Menge</td><td>Artikel</td></tr>",
+  "<tr><td>P0745</td><td>333691</td><td>5</td><td>T-Stücke</td></tr>",
+  '<tr><td colspan="14">Chargen-Analyse (aus Vormaterialzeugnis)</td></tr>',
+  "<tr><td>C</td><td>SI</td><td>Mn</td><td>P</td><td>S</td><td>AI</td><td>Cu</td><td>Cr</td><td>Mo</td><td>NI</td><td>TI</td><td>V</td><td>Nb</td><td>Cr+Cu+Mo+NI</td></tr>",
+  "<tr><td>0,14</td><td>0,2</td><td>0,56</td><td>0,012</td><td>0,001</td><td>0,027</td><td>0,04</td><td>0,07</td><td>0,02</td><td>0,06</td><td>0,002</td><td>0,001</td><td>0,001</td><td>0,19</td></tr></table>",
+  "HEAT CHEMICAL ANALYSIS / SCHMELZANALYSE",
+  "X".repeat(700),
+  "<table><tr><td>Heat No.</td><td>V %</td><td>Ti %</td><td>Nb(Cb) %</td><td>N %</td><td>EF 10 %</td><td>EF 76 %</td></tr>",
+  "<tr><td>min</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>0.020</td></tr>",
+  "<tr><td>max</td><td>0.020</td><td>0.040</td><td>0.020</td><td>-</td><td>0.70</td><td>-</td></tr>",
+  "<tr><td>333691</td><td>0.001</td><td>0.002</td><td>0.001</td><td>0.0072</td><td>0.19</td><td>0.028</td></tr></table>",
+].join("\n");
+const starofitChemistry = await validate({
+  ...baseRow,
+  heatNumber: "333691",
+  chemicals: { C: 0.14, SI: 0.2, MN: 0.56, N: -1, Ti: 0.02 },
+}, {
+  criticalSource: starofitChemistryTables,
+  evidence: { chunks: [{ heats: [{ heatNumber: { value: "333691" }, chemistry: [
+    { element: "TI", analysisType: "H", rawValue: 0.002, scale: 1, value: 0.002 },
+  ] }] }] },
+});
+for (const [element, expected] of Object.entries({ C: 0.14, SI: 0.2, MN: 0.56, AL: 0.027, TI: 0.002, V: 0.001, NB: 0.001, N: 0.0072, "Cr+Cu+Mo+Ni": 0.19 })) {
+  assertEqual("Starofit chemistry " + element, starofitChemistry.chemicals[element], expected);
+}
+
+const unicornCompoundChemistry = [
+  "Schmelzen-Nr./Heat No.: 475670",
+  "Chemische Zusammensetzung / Chemical Composition",
+  "<table><tr><td></td><td>C</td><td>Si</td><td>Mn</td><td>P</td><td>S</td><td>Cr</td><td>Mo</td><td>Ni</td></tr>",
+  "<tr><td>Ist/Actual</td><td>0.044</td><td>0.24</td><td>1.27</td><td>0.036</td><td>0.005</td><td>17.60</td><td>0.42</td><td>9.84</td></tr></table>",
+  "<table><tr><td colspan=\"9\">CHEMISCHE ZUSAMMENSETZUNG GUSS U: % CHARGEN°. : 901972</td></tr>",
+  "<tr><td></td><td>C</td><td>Mn</td><td>Si</td><td>P</td><td>S</td><td>Cr</td><td>Ni</td><td>Co</td></tr>",
+  "<tr><td>Cer.</td><td>0.043</td><td>1.590</td><td>0.406</td><td>0.031</td><td>0.021</td><td>17.110</td><td>9.060</td><td>0.249</td></tr></table>",
+].join("\n");
+const unicornFirstHeat = await validate({
+  ...baseRow,
+  heatNumber: "475670",
+  chemicals: { C: 0.043, SI: 0.406, MN: 1.59 },
+}, { criticalSource: unicornCompoundChemistry });
+for (const [element, expected] of Object.entries({ C: 0.044, SI: 0.24, MN: 1.27, P: 0.036, S: 0.005, CR: 17.6, MO: 0.42, NI: 9.84 })) {
+  assertEqual("Unicorn first-heat chemistry " + element, unicornFirstHeat.chemicals[element], expected);
+}
 
 const dalmine = await validate({
   ...baseRow,
@@ -274,6 +350,15 @@ assertEqual("Venus yieldStrength10", venus.yieldStrength10, 301.87);
 assertEqual("Venus tensileStrength", venus.tensileStrength, 608.63);
 assertEqual("Venus preferred elongation", venus.elongation, 63);
 
+const venusLiveShape = await validate({ ...baseRow, heatNumber: "N3164", yieldStrength02: 279.26, yieldStrength10: 301.87, tensileStrength: 608.63, elongation: 57.5 }, {
+  criticalSource: "<table><tr><td>Mechanical tests @ Room temperature</td><td>% Elongation</td></tr><tr><td>608.63613.85</td><td>63.0 / 57.5364.0 / 58.44</td></tr></table>",
+  evidence: { chunks: [{ heats: [{ heatNumber: { value: "N3164" }, tensileTests: [
+    { comparableGroupId: "N3164-1", testBlockId: "N3164-1", gaugeLengthType: "A5", temperatureC: 20, yieldStrength02: 279.26, yieldStrength10: 301.87, yieldStrength10Explicit: true, tensileStrength: 608.63, elongation: 63, isPrimaryAcceptanceBlock: true, sourceQuote: "608.63 / 279.26 / 301.87 / 63.0" },
+    { comparableGroupId: "N3164-1", testBlockId: "N3164-1", gaugeLengthType: "A5", temperatureC: 20, yieldStrength02: 327.21, yieldStrength10: 358.29, yieldStrength10Explicit: true, tensileStrength: 613.85, elongation: 57.5, isPrimaryAcceptanceBlock: true, sourceQuote: "613.85 / 327.21 / 358.29 / 57.5" },
+  ] }] }] },
+});
+assertEqual("Venus live-shape preferred elongation", venusLiveShape.elongation, 63);
+
 const lindemann = await validate({
   ...baseRow,
   heatNumber: "57495K",
@@ -301,4 +386,4 @@ const jmd = await validate({
 assertEqual("JMD material standard 1", jmd.norm1, "ASTM A182M-24");
 assertEqual("JMD material standard 2", jmd.norm2, "ASME SA-182M-23");
 
-console.log("DeepSeek traces and deterministic reducer passed B+K, Silcotub, Dalmine, Venus, Lindemann, empty-cell, evidence-precedence, and Rp1.0 tests.");
+console.log("DeepSeek traces and deterministic reducer passed B+K, Silcotub chemistry scaling, Starofit chemistry merging, Unicorn multi-heat isolation, Dalmine, Venus, Lindemann, empty-cell, evidence-precedence, and Rp1.0 tests.");
