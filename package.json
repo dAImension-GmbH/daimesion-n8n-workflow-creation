@@ -5,11 +5,11 @@
   "type": "module",
   "description": "Local workflow creation tooling for n8n.",
   "scripts": {
-    "test": "npm run validate && npm run test:email-queue && npm run test:deepseek-reducer && npm run test:certificate-suite",
+    "test": "npm run validate && npm run test:email-queue && npm run test:glm-reducer && npm run test:certificate-suite",
     "check": "node scripts/n8n.js check",
     "test:certificate": "node scripts/test-certificate-regression.js",
     "test:certificate-suite": "node scripts/test-certificate-suite.js",
-    "test:deepseek-reducer": "node scripts/test-deepseek-certificate-reducer.js",
+    "test:glm-reducer": "node scripts/test-glm-certificate-reducer.js",
     "test:email-queue": "node scripts/test-email-queue.js",
     "setup:evaluations": "node scripts/setup-certificate-evaluations.js",
     "prepare:evaluations": "node scripts/prepare-certificate-evaluation-workflow.js",

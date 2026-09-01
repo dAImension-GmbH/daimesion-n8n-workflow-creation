@@ -36,7 +36,7 @@ const baseRow = {
   norm5: "-1",
 };
 
-async function validate(row, { poNumber = row.customerOrderNumber, evidence = { chunks: [] }, criticalSource = "" } = {}) {
+async function validate(row, { poNumber = row.customerOrderNumber, evidence = { chunks: [] }, criticalSource = "", siblingRows = [] } = {}) {
   const context = {
     correlationKey: poNumber,
     replyMailId: "reducer-test",
@@ -65,7 +65,7 @@ async function validate(row, { poNumber = row.customerOrderNumber, evidence = { 
     },
   });
   const input = {
-    first: () => ({ json: { choices: [{ message: { content: JSON.stringify({ results: [row] }) } }] } }),
+    first: () => ({ json: { choices: [{ message: { content: JSON.stringify({ results: [row, ...siblingRows] }) } }] } }),
   };
   const factory = new Function("$input", "$", `return async function () {\n${code}\n}`);
   return (await factory(input, selectNode)())[0].json.results[0];
@@ -163,6 +163,39 @@ assertEqual("Silcotub yieldStrength02", silcotub.yieldStrength02, 509);
 assertEqual("Silcotub tensileStrength", silcotub.tensileStrength, 679);
 assertEqual("Silcotub elongation", silcotub.elongation, 26);
 
+const silcotubNestedEvidence = await validate({
+  ...baseRow,
+  heatNumber: "938166",
+  yieldStrength02: 512,
+  tensileStrength: 679,
+  elongation: 37.5,
+  mechanicalSelection: {
+    selectedComparableGroupId: "UPPER-2IN",
+    gaugeLengthType: "2IN",
+    tests: [
+      { comparableGroupId: "UPPER-2IN", specimenId: "Q5115", gaugeLengthType: "2IN", isPrimaryAcceptanceBlock: true, yieldStrength02: 512, tensileStrength: 679, elongation: 37.5 },
+      { comparableGroupId: "UPPER-2IN", specimenId: "Q5116", gaugeLengthType: "2IN", isPrimaryAcceptanceBlock: true, yieldStrength02: 511, tensileStrength: 683, elongation: 40 },
+    ],
+  },
+}, {
+  evidence: {
+    chunks: [{
+      certificate: {
+        heats: [{
+          heatNumber: { value: "938166" },
+          tensileTests: [
+            { comparableGroupId: "LOWER-5D", testBlockId: "LOWER-5D", specimenId: "Q5113", gaugeLengthType: "5D", isPrimaryAcceptanceBlock: true, temperatureC: 20, yieldStrength02: 512, tensileStrength: 679, elongation: 26 },
+            { comparableGroupId: "LOWER-5D", testBlockId: "LOWER-5D", specimenId: "Q5114", gaugeLengthType: "5D", isPrimaryAcceptanceBlock: true, temperatureC: 20, yieldStrength02: 509, tensileStrength: 679, elongation: 28 },
+          ],
+        }],
+      },
+    }],
+  },
+});
+assertEqual("nested Silcotub yieldStrength02", silcotubNestedEvidence.yieldStrength02, 509);
+assertEqual("nested Silcotub tensileStrength", silcotubNestedEvidence.tensileStrength, 679);
+assertEqual("nested Silcotub elongation", silcotubNestedEvidence.elongation, 26);
+
 const silcotubChemistryTable = [
   "CHEMICAL COMPOSITION / CHEMISCHE ZUSAMMENSETZUNG",
   '<table><tr><td rowspan="5" colspan="4"></td><td colspan="21">Composition %</td></tr>',
@@ -258,6 +291,74 @@ const dalmine = await validate({
 assertEqual("Dalmine yieldStrength02", dalmine.yieldStrength02, 364);
 assertEqual("Dalmine tensileStrength", dalmine.tensileStrength, 498);
 assertEqual("Dalmine elongation", dalmine.elongation, 23.5);
+
+const dalminePieceQuantity = await validate({
+  ...baseRow,
+  heatNumber: "956643",
+  customerOrderNumber: "PO-25-BBT000155",
+  quantity: 6.64,
+  deckSelection: {
+    documentRole: "DECK",
+    sourceBlockIndex: 1,
+    customerOrderNumber: "PO-25-BBT000155",
+    certificateNumber: "01-26-02987",
+    quantity: 6.64,
+  },
+}, {
+  poNumber: "",
+  evidence: {
+    chunks: [{
+      sourceBlock: { index: 1 },
+      certificate: {
+        documentRole: { value: "DECK" },
+        deckIndicators: { customerOrder: true, finishedProduct: true, finishedQuantity: true, finishedDimensions: true },
+        certificateNumber: { value: "01-26-02987" },
+        customerOrderNumber: { value: "PO-25-BBT000155" },
+      },
+      heats: [{
+        heatNumber: { value: "956643" },
+        quantity: { value: 1, unit: "pcs", sourceQuote: "Quantity / Menge: 1Pcs/Pz 6.64 mt 315 kg" },
+      }],
+    }],
+  },
+});
+assertEqual("Dalmine piece quantity without order context", dalminePieceQuantity.quantity, 1);
+
+const unicornPositionDimensions = await validate({
+  ...baseRow,
+  heatNumber: "475670",
+  customerOrderNumber: "PO-25-RFS003046",
+  quantity: 2,
+  product: "Hülse 193,7 x 22,2 mm",
+  dimensions: "193.7 x 22.2 mm",
+}, {
+  poNumber: "",
+  siblingRows: [{
+    ...baseRow,
+    heatNumber: "901972",
+    customerOrderNumber: "PO-25-RFS003046",
+    quantity: 2,
+    product: "Hülse 133,0 x 14,2 mm",
+    dimensions: "133.0 x 14.2 mm",
+  }],
+  evidence: {
+    chunks: [{
+      sourceBlock: { index: 1 },
+      certificate: {
+        documentRole: { value: "DECK" },
+        deckIndicators: { customerOrder: true, finishedProduct: true, finishedQuantity: true, finishedDimensions: true },
+        certificateNumber: { value: "2026-102898" },
+        customerOrderNumber: { value: "PO-25-RFS003046" },
+        product: { value: "Hülse 193,7 x 22,2 mm / Hülse 133,0 x 14,2 mm" },
+        dimensions: { value: "193.7 x 22.2 / 133.0 x 14.2 mm" },
+      },
+      heats: [{ heatNumber: { value: "475670" }, quantity: { value: 4, unit: "pcs" } }],
+    }],
+  },
+});
+assertEqual("Unicorn position-specific dimensions", unicornPositionDimensions.dimensions, "193.7 x 22.2 mm");
+assertEqual("Unicorn position-specific product", unicornPositionDimensions.product, "Hülse 193,7 x 22,2 mm");
+assertEqual("Unicorn position-specific quantity", unicornPositionDimensions.quantity, 2);
 
 const invalidOffset = await validate({ ...baseRow, yieldStrength02: 300, yieldStrength10: 250 });
 assertEqual("invalid Rp1.0 reset", invalidOffset.yieldStrength10, -1);
@@ -386,4 +487,4 @@ const jmd = await validate({
 assertEqual("JMD material standard 1", jmd.norm1, "ASTM A182M-24");
 assertEqual("JMD material standard 2", jmd.norm2, "ASME SA-182M-23");
 
-console.log("DeepSeek traces and deterministic reducer passed B+K, Silcotub chemistry scaling, Starofit chemistry merging, Unicorn multi-heat isolation, Dalmine, Venus, Lindemann, empty-cell, evidence-precedence, and Rp1.0 tests.");
+console.log("GLM 5.3 Flash traces and deterministic reducer passed B+K, Silcotub chemistry scaling, Starofit chemistry merging, Unicorn multi-heat isolation, Dalmine, Venus, Lindemann, empty-cell, evidence-precedence, and Rp1.0 tests.");

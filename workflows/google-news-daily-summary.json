@@ -1,11 +1,16 @@
 {
-  "updatedAt": "2026-06-18T19:18:58.780Z",
-  "createdAt": "2026-06-18T19:10:53.258Z",
-  "id": "PUEOI48SP6kjzRsM",
+  "id": "DqE9unTBJSUH3Jhn",
   "name": "Google News Daily Summary",
   "description": null,
   "active": true,
+  "activeVersionId": "d634d846-0c27-4c85-b6fd-f1a835598935",
+  "createdAt": "2026-08-31T23:46:29.522Z",
+  "updatedAt": "2026-08-31T23:46:29.522Z",
   "isArchived": false,
+  "versionId": "d634d846-0c27-4c85-b6fd-f1a835598935",
+  "versionCounter": 1,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
   "nodes": [
     {
       "parameters": {
@@ -53,7 +58,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const berlinDay = new Intl.DateTimeFormat('en-CA', {\n  timeZone: 'Europe/Berlin',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n});\n\nconst today = berlinDay.format(new Date());\n\nfunction clean(value) {\n  return typeof value === 'string'\n    ? value.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim()\n    : '';\n}\n\nfunction dayKey(value) {\n  if (!value) return null;\n  const date = new Date(value);\n  return Number.isNaN(date.valueOf()) ? null : berlinDay.format(date);\n}\n\nconst seen = new Set();\nconst articles = $input.all()\n  .map(({ json }) => {\n    const title = clean(json.title);\n    const link = clean(json.link || json.guid);\n    const publishedAt = json.isoDate || json.pubDate || json.date || null;\n    const source = clean(json.creator || json.author || json['dc:creator'] || 'Google News');\n    const snippet = clean(json.contentSnippet || json.content || json.description);\n\n    return { title, link, publishedAt, source, snippet };\n  })\n  .filter((article) => article.title && article.link)\n  .filter((article) => {\n    const key = `${article.title}|${article.link}`;\n    if (seen.has(key)) return false;\n    seen.add(key);\n    return true;\n  })\n  .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));\n\nconst todaysArticles = articles.filter((article) => dayKey(article.publishedAt) === today);\nconst selectedArticles = (todaysArticles.length > 0 ? todaysArticles : articles).slice(0, 25);\n\nconst articleDigest = selectedArticles.map((article, index) => [\n  `${index + 1}. ${article.title}`,\n  `Quelle: ${article.source}`,\n  `Zeit: ${article.publishedAt || 'unbekannt'}`,\n  `Link: ${article.link}`,\n  `Kurztext: ${article.snippet || 'kein Kurztext verfuegbar'}`,\n].join('\\n')).join('\\n\\n');\n\nconst systemPrompt = [\n  'Du bist ein praeziser deutschsprachiger Nachrichtenredakteur.',\n  'Fasse nur die gelieferten Google-News-RSS-Artikel zusammen.',\n  'Erfinde keine Fakten und markiere Unsicherheit klar.',\n  'Gib eine kompakte, gut lesbare Ausgabe auf Deutsch zurueck.',\n].join(' ');\n\nconst userPrompt = selectedArticles.length === 0\n  ? `Heute ist ${today} in der Zeitzone Europe/Berlin. Im Google-News-RSS-Feed wurden keine Artikel gefunden. Gib eine kurze Meldung aus, dass keine Nachrichten zusammengefasst werden konnten.`\n  : [\n      `Heute ist ${today} in der Zeitzone Europe/Berlin.`,\n      todaysArticles.length > 0\n        ? `Fasse die folgenden ${selectedArticles.length} heutigen Google-News-Artikel zusammen.`\n        : `Im Feed waren keine eindeutig heutigen Artikel. Fasse die neuesten ${selectedArticles.length} Google-News-Artikel zusammen und weise darauf hin.`,\n      '',\n      'Bitte liefere:',\n      '1. Eine Executive Summary mit 5 bis 7 Bulletpoints.',\n      '2. Die wichtigsten Themencluster mit je 2 bis 3 Saetzen.',\n      '3. Eine kurze Liste der Top-Links mit Titel und URL.',\n      '',\n      articleDigest,\n    ].join('\\n');\n\nreturn [{\n  json: {\n    date: today,\n    source: 'Google News Deutschland RSS',\n    feedUrl: 'https://news.google.com/rss?hl=de&gl=DE&ceid=DE:de',\n    articleCount: selectedArticles.length,\n    onlyLatestArticles: todaysArticles.length === 0,\n    articles: selectedArticles,\n    llmRequest: {\n      model: 'qwen3.6',\n      temperature: 0.2,\n      messages: [\n        { role: 'system', content: systemPrompt },\n        { role: 'user', content: userPrompt },\n      ],\n    },\n  },\n}];"
+        "jsCode": "const berlinDay = new Intl.DateTimeFormat('en-CA', {\n  timeZone: 'Europe/Berlin',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n});\n\nconst today = berlinDay.format(new Date());\n\nfunction clean(value) {\n  return typeof value === 'string'\n    ? value.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim()\n    : '';\n}\n\nfunction dayKey(value) {\n  if (!value) return null;\n  const date = new Date(value);\n  return Number.isNaN(date.valueOf()) ? null : berlinDay.format(date);\n}\n\nconst seen = new Set();\nconst articles = $input.all()\n  .map(({ json }) => {\n    const title = clean(json.title);\n    const link = clean(json.link || json.guid);\n    const publishedAt = json.isoDate || json.pubDate || json.date || null;\n    const source = clean(json.creator || json.author || json['dc:creator'] || 'Google News');\n    const snippet = clean(json.contentSnippet || json.content || json.description);\n\n    return { title, link, publishedAt, source, snippet };\n  })\n  .filter((article) => article.title && article.link)\n  .filter((article) => {\n    const key = `${article.title}|${article.link}`;\n    if (seen.has(key)) return false;\n    seen.add(key);\n    return true;\n  })\n  .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));\n\nconst todaysArticles = articles.filter((article) => dayKey(article.publishedAt) === today);\nconst selectedArticles = (todaysArticles.length > 0 ? todaysArticles : articles).slice(0, 25);\n\nconst articleDigest = selectedArticles.map((article, index) => [\n  `${index + 1}. ${article.title}`,\n  `Quelle: ${article.source}`,\n  `Zeit: ${article.publishedAt || 'unbekannt'}`,\n  `Link: ${article.link}`,\n  `Kurztext: ${article.snippet || 'kein Kurztext verfuegbar'}`,\n].join('\\n')).join('\\n\\n');\n\nconst systemPrompt = [\n  'Du bist ein praeziser deutschsprachiger Nachrichtenredakteur.',\n  'Fasse nur die gelieferten Google-News-RSS-Artikel zusammen.',\n  'Erfinde keine Fakten und markiere Unsicherheit klar.',\n  'Gib eine kompakte, gut lesbare Ausgabe auf Deutsch zurueck.',\n].join(' ');\n\nconst userPrompt = selectedArticles.length === 0\n  ? `Heute ist ${today} in der Zeitzone Europe/Berlin. Im Google-News-RSS-Feed wurden keine Artikel gefunden. Gib eine kurze Meldung aus, dass keine Nachrichten zusammengefasst werden konnten.`\n  : [\n      `Heute ist ${today} in der Zeitzone Europe/Berlin.`,\n      todaysArticles.length > 0\n        ? `Fasse die folgenden ${selectedArticles.length} heutigen Google-News-Artikel zusammen.`\n        : `Im Feed waren keine eindeutig heutigen Artikel. Fasse die neuesten ${selectedArticles.length} Google-News-Artikel zusammen und weise darauf hin.`,\n      '',\n      'Bitte liefere:',\n      '1. Eine Executive Summary mit 5 bis 7 Bulletpoints.',\n      '2. Die wichtigsten Themencluster mit je 2 bis 3 Saetzen.',\n      '3. Eine kurze Liste der Top-Links mit Titel und URL.',\n      '',\n      articleDigest,\n    ].join('\\n');\n\nreturn [{\n  json: {\n    date: today,\n    source: 'Google News Deutschland RSS',\n    feedUrl: 'https://news.google.com/rss?hl=de&gl=DE&ceid=DE:de',\n    articleCount: selectedArticles.length,\n    onlyLatestArticles: todaysArticles.length === 0,\n    articles: selectedArticles,\n    llmRequest: {\n      model: 'qwen3.8',\n      temperature: 0.2,\n      messages: [\n        { role: 'system', content: systemPrompt },\n        { role: 'user', content: userPrompt },\n      ],\n    },\n  },\n}];"
       },
       "id": "9b35df67-f462-41ef-a763-11c550f2086d",
       "name": "Prepare News Summary Prompt",
@@ -88,7 +93,7 @@
       },
       "credentials": {
         "httpBearerAuth": {
-          "id": "Vmx5VeUdNM2zhxzw",
+          "id": "pAOBlEBSCcHS5Do1",
           "name": "Daimension LLM Bearer Auth"
         }
       },
@@ -103,7 +108,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $json.choices?.[0]?.message?.content\n  || $json.output_text\n  || $json.text\n  || JSON.stringify($json, null, 2);\n\nreturn [{\n  json: {\n    generatedAt: new Date().toISOString(),\n    model: $json.model || 'qwen3.6',\n    summary: content,\n    usage: $json.usage || null,\n  },\n}];"
+        "jsCode": "const content = $json.choices?.[0]?.message?.content\n  || $json.output_text\n  || $json.text\n  || JSON.stringify($json, null, 2);\n\nreturn [{\n  json: {\n    generatedAt: new Date().toISOString(),\n    model: $json.model || 'qwen3.8',\n    summary: content,\n    usage: $json.usage || null,\n  },\n}];"
       },
       "id": "80f25581-be17-4a1b-b85f-1b5764d6218b",
       "name": "Format Summary Output",
@@ -172,41 +177,44 @@
       ]
     }
   },
-  "settings": {},
-  "staticData": null,
-  "meta": null,
   "nodeGroups": [],
-  "pinData": {},
-  "versionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
-  "activeVersionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
-  "versionCounter": 5,
-  "triggerCount": 1,
-  "sourceWorkflowId": null,
+  "settings": {},
+  "staticData": {
+    "node:Every morning": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": null,
+  "meta": null,
+  "tags": [],
   "shared": [
     {
-      "updatedAt": "2026-06-18T19:10:53.259Z",
-      "createdAt": "2026-06-18T19:10:53.259Z",
       "role": "workflow:owner",
-      "workflowId": "PUEOI48SP6kjzRsM",
-      "projectId": "LMxbbUGshEwmCSrO",
+      "workflowId": "DqE9unTBJSUH3Jhn",
+      "projectId": "rQWJLyrY2gAKELRh",
       "project": {
-        "updatedAt": "2026-06-18T18:45:49.668Z",
-        "createdAt": "2026-06-18T18:42:48.428Z",
-        "id": "LMxbbUGshEwmCSrO",
-        "name": "Maik Daniel Klause <maik.klause@daimension.de>",
+        "id": "rQWJLyrY2gAKELRh",
+        "name": "Maik Daniel Klause <maik.klaus@daimension.de>",
         "type": "personal",
         "icon": null,
         "description": null,
         "customTelemetryTags": [],
-        "creatorId": "32d9ee0a-a769-4905-afbc-c590af56d0ad"
-      }
+        "creatorId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b",
+        "createdAt": "2026-08-05T13:13:03.776Z",
+        "updatedAt": "2026-08-05T13:21:12.673Z"
+      },
+      "createdAt": "2026-08-31T23:46:29.522Z",
+      "updatedAt": "2026-08-31T23:46:29.522Z"
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-06-18T19:18:58.780Z",
-    "createdAt": "2026-06-18T19:18:58.780Z",
-    "versionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
-    "workflowId": "PUEOI48SP6kjzRsM",
+    "versionId": "d634d846-0c27-4c85-b6fd-f1a835598935",
+    "workflowId": "DqE9unTBJSUH3Jhn",
     "nodes": [
       {
         "parameters": {
@@ -254,7 +262,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const berlinDay = new Intl.DateTimeFormat('en-CA', {\n  timeZone: 'Europe/Berlin',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n});\n\nconst today = berlinDay.format(new Date());\n\nfunction clean(value) {\n  return typeof value === 'string'\n    ? value.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim()\n    : '';\n}\n\nfunction dayKey(value) {\n  if (!value) return null;\n  const date = new Date(value);\n  return Number.isNaN(date.valueOf()) ? null : berlinDay.format(date);\n}\n\nconst seen = new Set();\nconst articles = $input.all()\n  .map(({ json }) => {\n    const title = clean(json.title);\n    const link = clean(json.link || json.guid);\n    const publishedAt = json.isoDate || json.pubDate || json.date || null;\n    const source = clean(json.creator || json.author || json['dc:creator'] || 'Google News');\n    const snippet = clean(json.contentSnippet || json.content || json.description);\n\n    return { title, link, publishedAt, source, snippet };\n  })\n  .filter((article) => article.title && article.link)\n  .filter((article) => {\n    const key = `${article.title}|${article.link}`;\n    if (seen.has(key)) return false;\n    seen.add(key);\n    return true;\n  })\n  .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));\n\nconst todaysArticles = articles.filter((article) => dayKey(article.publishedAt) === today);\nconst selectedArticles = (todaysArticles.length > 0 ? todaysArticles : articles).slice(0, 25);\n\nconst articleDigest = selectedArticles.map((article, index) => [\n  `${index + 1}. ${article.title}`,\n  `Quelle: ${article.source}`,\n  `Zeit: ${article.publishedAt || 'unbekannt'}`,\n  `Link: ${article.link}`,\n  `Kurztext: ${article.snippet || 'kein Kurztext verfuegbar'}`,\n].join('\\n')).join('\\n\\n');\n\nconst systemPrompt = [\n  'Du bist ein praeziser deutschsprachiger Nachrichtenredakteur.',\n  'Fasse nur die gelieferten Google-News-RSS-Artikel zusammen.',\n  'Erfinde keine Fakten und markiere Unsicherheit klar.',\n  'Gib eine kompakte, gut lesbare Ausgabe auf Deutsch zurueck.',\n].join(' ');\n\nconst userPrompt = selectedArticles.length === 0\n  ? `Heute ist ${today} in der Zeitzone Europe/Berlin. Im Google-News-RSS-Feed wurden keine Artikel gefunden. Gib eine kurze Meldung aus, dass keine Nachrichten zusammengefasst werden konnten.`\n  : [\n      `Heute ist ${today} in der Zeitzone Europe/Berlin.`,\n      todaysArticles.length > 0\n        ? `Fasse die folgenden ${selectedArticles.length} heutigen Google-News-Artikel zusammen.`\n        : `Im Feed waren keine eindeutig heutigen Artikel. Fasse die neuesten ${selectedArticles.length} Google-News-Artikel zusammen und weise darauf hin.`,\n      '',\n      'Bitte liefere:',\n      '1. Eine Executive Summary mit 5 bis 7 Bulletpoints.',\n      '2. Die wichtigsten Themencluster mit je 2 bis 3 Saetzen.',\n      '3. Eine kurze Liste der Top-Links mit Titel und URL.',\n      '',\n      articleDigest,\n    ].join('\\n');\n\nreturn [{\n  json: {\n    date: today,\n    source: 'Google News Deutschland RSS',\n    feedUrl: 'https://news.google.com/rss?hl=de&gl=DE&ceid=DE:de',\n    articleCount: selectedArticles.length,\n    onlyLatestArticles: todaysArticles.length === 0,\n    articles: selectedArticles,\n    llmRequest: {\n      model: 'qwen3.6',\n      temperature: 0.2,\n      messages: [\n        { role: 'system', content: systemPrompt },\n        { role: 'user', content: userPrompt },\n      ],\n    },\n  },\n}];"
+          "jsCode": "const berlinDay = new Intl.DateTimeFormat('en-CA', {\n  timeZone: 'Europe/Berlin',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n});\n\nconst today = berlinDay.format(new Date());\n\nfunction clean(value) {\n  return typeof value === 'string'\n    ? value.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim()\n    : '';\n}\n\nfunction dayKey(value) {\n  if (!value) return null;\n  const date = new Date(value);\n  return Number.isNaN(date.valueOf()) ? null : berlinDay.format(date);\n}\n\nconst seen = new Set();\nconst articles = $input.all()\n  .map(({ json }) => {\n    const title = clean(json.title);\n    const link = clean(json.link || json.guid);\n    const publishedAt = json.isoDate || json.pubDate || json.date || null;\n    const source = clean(json.creator || json.author || json['dc:creator'] || 'Google News');\n    const snippet = clean(json.contentSnippet || json.content || json.description);\n\n    return { title, link, publishedAt, source, snippet };\n  })\n  .filter((article) => article.title && article.link)\n  .filter((article) => {\n    const key = `${article.title}|${article.link}`;\n    if (seen.has(key)) return false;\n    seen.add(key);\n    return true;\n  })\n  .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));\n\nconst todaysArticles = articles.filter((article) => dayKey(article.publishedAt) === today);\nconst selectedArticles = (todaysArticles.length > 0 ? todaysArticles : articles).slice(0, 25);\n\nconst articleDigest = selectedArticles.map((article, index) => [\n  `${index + 1}. ${article.title}`,\n  `Quelle: ${article.source}`,\n  `Zeit: ${article.publishedAt || 'unbekannt'}`,\n  `Link: ${article.link}`,\n  `Kurztext: ${article.snippet || 'kein Kurztext verfuegbar'}`,\n].join('\\n')).join('\\n\\n');\n\nconst systemPrompt = [\n  'Du bist ein praeziser deutschsprachiger Nachrichtenredakteur.',\n  'Fasse nur die gelieferten Google-News-RSS-Artikel zusammen.',\n  'Erfinde keine Fakten und markiere Unsicherheit klar.',\n  'Gib eine kompakte, gut lesbare Ausgabe auf Deutsch zurueck.',\n].join(' ');\n\nconst userPrompt = selectedArticles.length === 0\n  ? `Heute ist ${today} in der Zeitzone Europe/Berlin. Im Google-News-RSS-Feed wurden keine Artikel gefunden. Gib eine kurze Meldung aus, dass keine Nachrichten zusammengefasst werden konnten.`\n  : [\n      `Heute ist ${today} in der Zeitzone Europe/Berlin.`,\n      todaysArticles.length > 0\n        ? `Fasse die folgenden ${selectedArticles.length} heutigen Google-News-Artikel zusammen.`\n        : `Im Feed waren keine eindeutig heutigen Artikel. Fasse die neuesten ${selectedArticles.length} Google-News-Artikel zusammen und weise darauf hin.`,\n      '',\n      'Bitte liefere:',\n      '1. Eine Executive Summary mit 5 bis 7 Bulletpoints.',\n      '2. Die wichtigsten Themencluster mit je 2 bis 3 Saetzen.',\n      '3. Eine kurze Liste der Top-Links mit Titel und URL.',\n      '',\n      articleDigest,\n    ].join('\\n');\n\nreturn [{\n  json: {\n    date: today,\n    source: 'Google News Deutschland RSS',\n    feedUrl: 'https://news.google.com/rss?hl=de&gl=DE&ceid=DE:de',\n    articleCount: selectedArticles.length,\n    onlyLatestArticles: todaysArticles.length === 0,\n    articles: selectedArticles,\n    llmRequest: {\n      model: 'qwen3.8',\n      temperature: 0.2,\n      messages: [\n        { role: 'system', content: systemPrompt },\n        { role: 'user', content: userPrompt },\n      ],\n    },\n  },\n}];"
         },
         "id": "9b35df67-f462-41ef-a763-11c550f2086d",
         "name": "Prepare News Summary Prompt",
@@ -269,13 +277,11 @@
         "parameters": {
           "method": "POST",
           "url": "https://llm-inference.daimension.ai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
           "sendHeaders": true,
           "headerParameters": {
             "parameters": [
-              {
-                "name": "Authorization",
-                "value": "={{ 'Bearer ' + $env.DAIMENSION_API_KEY }}"
-              },
               {
                 "name": "Content-Type",
                 "value": "application/json"
@@ -289,6 +295,12 @@
             "timeout": 120000
           }
         },
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "pAOBlEBSCcHS5Do1",
+            "name": "Daimension LLM Bearer Auth"
+          }
+        },
         "id": "ddccd499-77c0-417a-be6e-ad1b1ba755bc",
         "name": "Summarize with Daimension LLM",
         "type": "n8n-nodes-base.httpRequest",
@@ -300,7 +312,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const content = $json.choices?.[0]?.message?.content\n  || $json.output_text\n  || $json.text\n  || JSON.stringify($json, null, 2);\n\nreturn [{\n  json: {\n    generatedAt: new Date().toISOString(),\n    model: $json.model || 'qwen3.6',\n    summary: content,\n    usage: $json.usage || null,\n  },\n}];"
+          "jsCode": "const content = $json.choices?.[0]?.message?.content\n  || $json.output_text\n  || $json.text\n  || JSON.stringify($json, null, 2);\n\nreturn [{\n  json: {\n    generatedAt: new Date().toISOString(),\n    model: $json.model || 'qwen3.8',\n    summary: content,\n    usage: $json.usage || null,\n  },\n}];"
         },
         "id": "80f25581-be17-4a1b-b85f-1b5764d6218b",
         "name": "Format Summary Output",
@@ -374,22 +386,32 @@
     "name": null,
     "description": null,
     "autosaved": false,
+    "createdAt": "2026-08-31T23:46:29.522Z",
+    "updatedAt": "2026-08-31T23:46:29.522Z",
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-06-18T19:18:58.799Z",
-        "id": 3,
-        "workflowId": "PUEOI48SP6kjzRsM",
-        "versionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
+        "id": 434,
+        "workflowId": "DqE9unTBJSUH3Jhn",
+        "versionId": "d634d846-0c27-4c85-b6fd-f1a835598935",
         "event": "activated",
-        "userId": "32d9ee0a-a769-4905-afbc-c590af56d0ad"
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b",
+        "createdAt": "2026-08-31T23:46:29.682Z"
       },
       {
-        "createdAt": "2026-06-18T19:18:58.791Z",
-        "id": 2,
-        "workflowId": "PUEOI48SP6kjzRsM",
-        "versionId": "6a693e83-e418-46a4-bf3e-5be2eef7512f",
+        "id": 435,
+        "workflowId": "DqE9unTBJSUH3Jhn",
+        "versionId": "d634d846-0c27-4c85-b6fd-f1a835598935",
         "event": "deactivated",
-        "userId": "32d9ee0a-a769-4905-afbc-c590af56d0ad"
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b",
+        "createdAt": "2026-08-31T23:46:29.826Z"
+      },
+      {
+        "id": 436,
+        "workflowId": "DqE9unTBJSUH3Jhn",
+        "versionId": "d634d846-0c27-4c85-b6fd-f1a835598935",
+        "event": "activated",
+        "userId": "3bb25c77-fe52-4fe7-afb3-3970a5c0b00b",
+        "createdAt": "2026-08-31T23:46:29.852Z"
       }
     ]
   }

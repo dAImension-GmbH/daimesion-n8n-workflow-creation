@@ -69,7 +69,7 @@ single-message worker. The dispatcher treats unread messages as its queue,
 claims at most five messages with the `DAIMENSION-PROCESSING` Outlook category,
 and starts one asynchronous worker execution for each claimed message. Overflow
 stays unread until a slot becomes free. A worker renews its lease during long
-MinerU and DeepSeek stages. A 55-second dispatcher lease prevents overlapping
+MinerU and GLM 5.3 Flash stages. A 55-second dispatcher lease prevents overlapping
 schedule ticks from claiming the same unread message.
 A message without a heartbeat for 15 minutes is
 retried up to three times; after the third stale attempt it remains unread with the
@@ -83,15 +83,24 @@ so a later worker retry does not send the same response twice.
 The certificate worker analyzes each Outlook message independently. PDF
 attachments are uploaded to dataset `4037` through
 `https://pdf.daimension.ai/api/v1/documents/pdf`. A stable numeric case number
-is derived from the mail correlation key. The workflow polls the asynchronous
+is derived from the mail correlation key. Before upload, the workflow rewrites
+object-stream PDFs and repairs classic XRef tables whose in-use entries point
+to missing or incorrect object offsets; valid classic PDFs remain unchanged.
+The workflow polls the asynchronous
 MinerU job and retrieves its Markdown, plain text, and page results. As soon as
 a certificate's PDF-to-text extraction succeeds, the extracted text passes
 through evidence extraction, schema normalization, and final review with
-`deepseek-v4-flash-3107` at dAImension.ai. Evidence blocks are processed one at
-a time with a short pause, and transient DeepSeek failures are retried up to
-three times with a delay. At the end, the workflow creates a
+`glm-5.3-flash` at dAImension.ai. Evidence blocks are processed one at
+a time with a short pause, and transient GLM 5.3 Flash failures are retried up to
+three times with a delay. GLM thinking uses the `high` reasoning level plus an
+explicit bounded-reasoning instruction; classification uses an 8K output budget,
+evidence extraction 16K, and normalization plus final review 32K so the
+structured JSON still fits after reasoning without exceeding the synchronous
+proxy window. At the end, the workflow creates a
 review in the BUHLMANN Document Review Tool and uploads both the original PDF
-and the complete normalized analysis. Reviewers can compare the source
+in sequential 256 KiB multipart chunks, plus the complete normalized analysis.
+The chunk fields and upload order match the Document Review app's upload
+contract, avoiding the proxy's single-request body limit. Reviewers can compare the source
 document and extracted values side by side at `/document-review`, correct the
 editable review payload, add comments, and approve the result. The original
 extraction remains preserved as the immutable source payload. Every imported
@@ -136,7 +145,7 @@ npm test
 ```
 
 These checks validate source markers, normalization, graph behavior, and scoring.
-They do not replace a live MinerU/DeepSeek evaluation run; the two image-only
+They do not replace a live MinerU/GLM 5.3 Flash evaluation run; the two image-only
 certificates are exercised end to end only when n8n and its credentials are
 available.
 
@@ -237,7 +246,7 @@ directly in workflow JSON.
 The Google News workflow reads the German Google News RSS feed, keeps today's
 items in the `Europe/Berlin` timezone, and sends a summary prompt to the
 OpenAI-compatible Daimension endpoint
-`https://llm-inference.daimension.ai/v1/chat/completions` with model `qwen3.6`.
+`https://llm-inference.daimension.ai/v1/chat/completions` with model `qwen3.8`.
 The HTTP Request node uses the n8n Bearer Auth credential `Daimension LLM Bearer
 Auth`; do not store the API token directly in workflow JSON.
 

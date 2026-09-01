@@ -47,6 +47,87 @@ const uploadCode = workflow.nodes.find((node) => node.name === "PDF-Upload vorbe
 if (!uploadCode.includes("normalizeLandscapeScanRotation") || !uploadCode.includes("landscape-scan-270-to-180") || !uploadCode.includes("hasPortraitScannerPage")) {
   throw new Error("Sideways landscape scan rotation normalization is missing before MinerU upload.");
 }
+if (!uploadCode.includes("hasInvalidClassicXref") || !uploadCode.includes("invalid-classic-xref-rebuilt")) {
+  throw new Error("Invalid classic XRef repair is missing before MinerU upload.");
+}
+if ((uploadCode.match(/rotationNormalizedPages:/g) ?? []).length !== 1) {
+  throw new Error("PDF upload metadata contains duplicate rotation-normalization fields.");
+}
+
+function buildClassicXrefPdf(invalidMissingEntry) {
+  const chunks = [];
+  const offsets = new Map();
+  let length = 0;
+  const push = (value) => {
+    const bytes = Buffer.from(value, "latin1");
+    chunks.push(bytes);
+    length += bytes.length;
+  };
+  push("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+  for (const [number, body] of [
+    [1, "<< /Type /Catalog /Pages 2 0 R >>"],
+    [2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"],
+    [3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] >>"],
+  ]) {
+    offsets.set(number, length);
+    push(`${number} 0 obj\n${body}\nendobj\n`);
+  }
+  const xrefOffset = length;
+  push("xref\n0 5\n0000000000 65535 f \n");
+  for (let number = 1; number <= 3; number++) {
+    push(`${String(offsets.get(number)).padStart(10, "0")} 00000 n \n`);
+  }
+  push(invalidMissingEntry ? "0000000000 00000 n \n" : "0000000000 00000 f \n");
+  push(`trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`);
+  return Buffer.concat(chunks);
+}
+
+async function runPdfUploadPreparation(pdf) {
+  const inputItem = {
+    json: { correlationKey: "classic-xref-regression", subject: "Classic XRef regression" },
+    binary: { data: { fileName: "classic-xref.pdf", mimeType: "application/pdf" } },
+  };
+  const execute = new AsyncFunction("$input", "$", uploadCode);
+  return execute.call({
+    helpers: {
+      getBinaryDataBuffer: async () => pdf,
+      prepareBinaryData: async (data, fileName, mimeType) => ({
+        fileName,
+        mimeType,
+        buffer: Buffer.from(data),
+      }),
+    },
+  }, {
+    first: () => inputItem,
+    all: () => [inputItem],
+  }, () => ({ first: () => undefined, all: () => [] }));
+}
+
+const malformedClassicPdf = buildClassicXrefPdf(true);
+const repairedClassicResult = await runPdfUploadPreparation(malformedClassicPdf);
+const repairedClassicItem = repairedClassicResult[0];
+const repairedClassicPdf = repairedClassicItem?.binary?.data?.buffer;
+const repairedClassicMetadata = JSON.parse(repairedClassicItem?.json?.pdfAdditionalInformation ?? "{}");
+if (!Buffer.isBuffer(repairedClassicPdf) || repairedClassicPdf.equals(malformedClassicPdf)) {
+  throw new Error("Malformed classic XRef PDF was not rewritten.");
+}
+if (repairedClassicMetadata.pdfNormalization !== "invalid-classic-xref-rebuilt" || repairedClassicItem?.json?.pdfNormalizationApplied !== true) {
+  throw new Error("Malformed classic XRef repair was not reported in upload metadata.");
+}
+if (/0000000000 00000 n/.test(repairedClassicPdf.toString("latin1"))) {
+  throw new Error("Rewritten classic XRef still marks a zero-offset object as in use.");
+}
+const repairedStartXref = Number(repairedClassicPdf.toString("latin1").match(/startxref\s+(\d+)\s+%%EOF\s*$/)?.[1]);
+if (!Number.isSafeInteger(repairedStartXref) || repairedClassicPdf.subarray(repairedStartXref, repairedStartXref + 4).toString("ascii") !== "xref") {
+  throw new Error("Rewritten classic PDF has an invalid startxref target.");
+}
+
+const healthyClassicPdf = buildClassicXrefPdf(false);
+const healthyClassicResult = await runPdfUploadPreparation(healthyClassicPdf);
+const healthyClassicItem = healthyClassicResult[0];
+if (!healthyClassicItem?.binary?.data?.buffer?.equals(healthyClassicPdf) || healthyClassicItem?.json?.pdfNormalizationApplied !== false) {
+  throw new Error("Healthy classic XRef PDF should remain byte-identical.");
+}
 const mineruErrorCode = workflow.nodes.find((node) => node.name === "MinerU-Fehler vorbereiten")?.parameters?.jsCode ?? "";
 if (!mineruErrorCode.includes("Evaluations-PDF vorbereiten")) throw new Error("MinerU error handling is not safe on the evaluation branch.");
 

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dispatcher = JSON.parse(readFileSync(path.join(ROOT, "workflows/outlook-certificate-dispatcher.json"), "utf8"));
 const worker = JSON.parse(readFileSync(path.join(ROOT, "workflows/outlook-certificate-analysis.json"), "utf8"));
+const news = JSON.parse(readFileSync(path.join(ROOT, "workflows/google-news-daily-summary.json"), "utf8"));
 const planner = dispatcher.nodes.find((node) => node.name === "Queue planen")?.parameters?.jsCode;
 
 if (!planner) throw new Error("Queue planner Code node is missing");
@@ -37,6 +38,28 @@ async function plan(messages, executionId = "queue-regression") {
 function assert(condition, messageText) {
   if (!condition) throw new Error(messageText);
 }
+
+const serializedWorkflows = JSON.stringify([dispatcher, worker, news]);
+assert(!/deepseek|qwen3\.6/i.test(serializedWorkflows), "Retired DeepSeek or Qwen 3.6 references must not remain in workflow JSON");
+const configuredModels = (workflow) => workflow.nodes.flatMap((node) =>
+  [...JSON.stringify(node).matchAll(/model:\s*'([^']+)'/g)].map((match) => match[1])
+);
+const workerModels = configuredModels(worker);
+const newsModels = configuredModels(news);
+assert(workerModels.length >= 5 && workerModels.every((model) => model === "glm-5.3-flash"), "Every certificate LLM request must use glm-5.3-flash");
+assert(newsModels.length >= 1 && newsModels.every((model) => model === "qwen3.8"), "Every Google News LLM request must use qwen3.8");
+const glmRequestNodes = worker.nodes.filter((node) => {
+  const code = node.parameters?.jsCode ?? "";
+  return code.includes("llmRequest") && code.includes("model: 'glm-5.3-flash'");
+});
+assert(glmRequestNodes.length >= 4, "Certificate workflow must expose all GLM request builders");
+assert(glmRequestNodes.every((node) => node.parameters.jsCode.includes("chat_template_kwargs: { enable_thinking: true }")), "Every GLM request must explicitly enable reasoning");
+assert(glmRequestNodes.every((node) => node.parameters.jsCode.includes("reasoning_effort: 'high'")), "Every GLM request must use the empirically validated high reasoning level");
+assert(glmRequestNodes.every((node) => node.parameters.jsCode.includes("Begrenze dein internes Reasoning strikt auf höchstens 3000 Tokens")), "Every GLM request must guard against proxy timeouts by prompting for bounded reasoning");
+assert(glmRequestNodes.every((node) => {
+  const tokenBudget = Number(node.parameters.jsCode.match(/max_tokens:\s*(\d+)/)?.[1] ?? 0);
+  return tokenBudget >= 8000;
+}), "Every GLM request must reserve at least 8K tokens for reasoning plus structured JSON");
 
 const burst = await plan(Array.from({ length: 8 }, (_, index) => message(index + 1)));
 assert(burst.filter((item) => item.json.action === "claim").length === 5, "Eight new emails must claim exactly five slots");
@@ -84,26 +107,26 @@ state.dispatcherLock.expiresAt = Date.now() - 1;
 const afterLockExpiry = await plan([message(71)], "next-scheduled-execution");
 assert(afterLockExpiry.some((item) => item.json.action === "claim"), "A later schedule must claim after the dispatcher lease expires");
 
-const evidenceLoop = worker.nodes.find((node) => node.name === "DeepSeek-Belegblöcke nacheinander");
+const evidenceLoop = worker.nodes.find((node) => node.name === "GLM 5.3 Flash-Belegblöcke nacheinander");
 assert(evidenceLoop?.type === "n8n-nodes-base.splitInBatches", "Evidence extraction must use an explicit item loop");
 assert(evidenceLoop?.parameters?.batchSize === 1, "Evidence extraction must process exactly one block at a time");
 const loopOutputs = worker.connections[evidenceLoop.name]?.main ?? [];
 assert(loopOutputs[0]?.some((entry) => entry.node === "Belege sammeln und Normalisierung bauen"), "Completed evidence loop must continue to normalization");
-assert(loopOutputs[1]?.some((entry) => entry.node === "Belege mit DeepSeek extrahieren"), "Loop output must call DeepSeek for one evidence block");
-assert(worker.connections["Belege mit DeepSeek extrahieren"]?.main?.[0]?.some((entry) => entry.node === "DeepSeek zwischen Blöcken entlasten"), "Evidence requests must be spaced between blocks");
-assert(worker.connections["DeepSeek zwischen Blöcken entlasten"]?.main?.[0]?.some((entry) => entry.node === evidenceLoop.name), "Evidence block path must return to the loop");
-assert(worker.connections["DeepSeek zwischen Blöcken entlasten"]?.main?.[0]?.some((entry) => entry.node === "Bearbeitungslease erneuern"), "Long evidence extraction must renew the processing lease");
+assert(loopOutputs[1]?.some((entry) => entry.node === "Belege mit GLM 5.3 Flash extrahieren"), "Loop output must call GLM 5.3 Flash for one evidence block");
+assert(worker.connections["Belege mit GLM 5.3 Flash extrahieren"]?.main?.[0]?.some((entry) => entry.node === "GLM 5.3 Flash zwischen Blöcken entlasten"), "Evidence requests must be spaced between blocks");
+assert(worker.connections["GLM 5.3 Flash zwischen Blöcken entlasten"]?.main?.[0]?.some((entry) => entry.node === evidenceLoop.name), "Evidence block path must return to the loop");
+assert(worker.connections["GLM 5.3 Flash zwischen Blöcken entlasten"]?.main?.[0]?.some((entry) => entry.node === "Bearbeitungslease erneuern"), "Long evidence extraction must renew the processing lease");
 
-for (const deepSeekNodeName of [
-  "Mail mit DeepSeek einordnen",
-  "Belege mit DeepSeek extrahieren",
-  "Mit DeepSeek normalisieren",
-  "Mit DeepSeek prüfen",
+for (const glmNodeName of [
+  "Mail mit GLM 5.3 Flash einordnen",
+  "Belege mit GLM 5.3 Flash extrahieren",
+  "Mit GLM 5.3 Flash normalisieren",
+  "Mit GLM 5.3 Flash prüfen",
 ]) {
-  const deepSeekNode = worker.nodes.find((node) => node.name === deepSeekNodeName);
-  assert(deepSeekNode?.retryOnFail === true, `${deepSeekNodeName} must retry transient failures`);
-  assert(deepSeekNode?.maxTries === 3, `${deepSeekNodeName} must try at most three times`);
-  assert(deepSeekNode?.waitBetweenTries >= 20_000, `${deepSeekNodeName} must delay retries`);
+  const glmNode = worker.nodes.find((node) => node.name === glmNodeName);
+  assert(glmNode?.retryOnFail === true, `${glmNodeName} must retry transient failures`);
+  assert(glmNode?.maxTries === 3, `${glmNodeName} must try at most three times`);
+  assert(glmNode?.waitBetweenTries >= 20_000, `${glmNodeName} must delay retries`);
 }
 
 const confirmationTargets = worker.connections["Bestätigung per Outlook"]?.main?.[0]?.map((entry) => entry.node) ?? [];
@@ -113,7 +136,7 @@ assert(resultTargets.includes("Ergebnisantwort merken"), "Result email must pers
 const rememberedTargets = worker.connections["Ergebnisantwort merken"]?.main?.[0]?.map((entry) => entry.node) ?? [];
 assert(rememberedTargets.includes("Outlook-Mail erfolgreich abschließen"), "Remembered result email must mark its Outlook message complete");
 const reviewCreate = worker.nodes.find((node) => node.name === "Dokumentenreview anlegen");
-assert(reviewCreate?.parameters?.jsonBody === "={{ $json.reviewCreateRequest }}", "Document review retries must use the stable mail-based clientRequestId");
+assert(reviewCreate?.parameters?.jsonBody === "={{ $json.reviewCreateRequest }}", "Document review retries must use the stable request-based clientRequestId");
 
 const reviewPrepare = worker.nodes.find((node) => node.name === "Dokumentenreview-Upload vorbereiten");
 assert(reviewPrepare?.parameters?.jsCode, "Document review upload preparation is missing");
@@ -181,6 +204,7 @@ async function prepareReview(mailId, orderLine) {
 
 const firstReview = (await prepareReview(`${sharedOutlookPrefix}-FIRST`))[0];
 const firstReviewRepeat = (await prepareReview(`${sharedOutlookPrefix}-FIRST`))[0];
+const firstReviewChanged = (await prepareReview(`${sharedOutlookPrefix}-FIRST`, "00020"))[0];
 const secondReview = (await prepareReview(`${sharedOutlookPrefix}-SECOND`, "00020"))[0];
 const firstRequest = firstReview.json.reviewCreateRequest;
 const secondRequest = secondReview.json.reviewCreateRequest;
@@ -195,14 +219,32 @@ assert(JSON.stringify(Object.keys(firstRequest.analysis[0]).sort()) === JSON.str
 assert(firstReview.json.results[0].quantity === 207.67, "Internal results must preserve numeric quantity");
 assert(firstReview.json.results[0].rawMaterialCertificate === "RAW-123", "Internal results must preserve rawMaterialCertificate");
 assert(firstRequest.clientRequestId === firstReviewRepeat.json.reviewCreateRequest.clientRequestId, "Document review idempotency key must be stable for the same mail");
+assert(firstRequest.clientRequestId !== firstReviewChanged.json.reviewCreateRequest.clientRequestId, "Document review idempotency key must change when the request body changes");
 assert(firstRequest.clientRequestId !== secondRequest.clientRequestId, "Document review idempotency keys must distinguish long Outlook IDs with a shared prefix");
 assert(firstRequest.clientRequestId.startsWith("n8n-certificate-") && firstRequest.clientRequestId.length <= 120, "Document review idempotency key must satisfy the API length contract");
+
+const reviewUpload = worker.nodes.find((node) => node.name === "Original-PDF in Review-Speicher hochladen");
+assert(reviewUpload?.type === "n8n-nodes-base.code", "Document review upload must split the materialized PDF into binary chunks");
+assert(reviewUpload?.parameters?.jsCode?.includes("const chunkSize = 262144"), "Document review upload must use the app's 256 KiB chunk contract");
+assert(reviewUpload?.parameters?.jsCode?.includes("getBinaryDataBuffer(0, 'data')"), "Chunk upload must materialize the exact PDF bytes");
+assert(reviewUpload?.parameters?.jsCode?.includes("pdf.length !== expectedBytes"), "Chunk upload must reject a PDF whose byte length differs from the review request");
+const reviewChunkLoop = worker.nodes.find((node) => node.name === "Review-Chunks nacheinander");
+const reviewChunkUpload = worker.nodes.find((node) => node.name === "Review-Chunk hochladen");
+assert(reviewChunkLoop?.type === "n8n-nodes-base.splitInBatches", "Document review chunks must be uploaded sequentially");
+assert(reviewChunkUpload?.parameters?.method === "POST" && reviewChunkUpload.parameters.url.includes("/api/v1/documents/"), "Document review chunks must use the service-authenticated chunk-upload endpoint");
+assert(reviewChunkUpload?.parameters?.contentType === "multipart-form-data", "Document review chunks must use multipart form data");
+assert(reviewChunkUpload?.parameters?.bodyParameters?.parameters?.some((parameter) => parameter.name === "chunkIndex"), "Chunk upload must send chunkIndex");
+assert(reviewChunkUpload?.parameters?.bodyParameters?.parameters?.some((parameter) => parameter.name === "totalChunks"), "Chunk upload must send totalChunks");
+assert(reviewChunkUpload?.parameters?.bodyParameters?.parameters?.some((parameter) => parameter.name === "file" && parameter.parameterType === "formBinaryData"), "Chunk upload must send the binary file part");
+assert(reviewChunkUpload?.credentials?.httpBearerAuth?.name?.startsWith("Buhlmann Document Review Bearer Auth"), "Chunk upload must use the Document Review service credential");
+assert(worker.connections["Review-Chunk hochladen"]?.main?.[0]?.some((entry) => entry.node === "Review-Chunks nacheinander"), "Each successful chunk must advance the sequential loop");
 
 for (const retryNodeName of [
   "MinerU-Status prüfen",
   "PDF mit MinerU lesen",
   "Dokumentenreview anlegen",
   "Original-PDF in Review-Speicher hochladen",
+  "Review-Chunk hochladen",
   "Dokumentenreview-Upload abschließen",
   "MinerU-Ausgabe an Absender",
   "Ergebnis per Outlook senden",
@@ -236,6 +278,6 @@ assert(resultIf[0]?.some((entry) => entry.node === "Outlook-Mail erfolgreich abs
 assert(resultIf[1]?.some((entry) => entry.node === "Ergebnis per Outlook senden"), "First result must be sent through Outlook");
 
 assert(worker.nodes.some((node) => node.name === "Evaluation deterministisch bewerten"), "Evaluations must use deterministic scoring");
-assert(!worker.nodes.some((node) => node.name === "Mit DeepSeek bewerten"), "Extraction model must not judge its own evaluation output");
+assert(!worker.nodes.some((node) => node.name === "Mit GLM 5.3 Flash bewerten"), "Extraction model must not judge its own evaluation output");
 
 console.log("Outlook queue regression checks passed.");

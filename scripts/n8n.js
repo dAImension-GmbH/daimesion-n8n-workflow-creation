@@ -401,6 +401,11 @@ async function executionNode(id, nodeName) {
   const output = runs.map((run, runIndex) => ({
     runIndex,
     error: run.error?.message ?? run.error?.description ?? null,
+    errorDescription: run.error?.description ?? null,
+    errorHttpCode: run.error?.httpCode ?? null,
+    errorMessages: run.error?.messages ?? null,
+    errorKeys: Object.keys(run.error ?? {}).sort(),
+    errorContextKeys: Object.keys(run.error?.context ?? {}).sort(),
     data: run.data?.main ?? [],
   }));
   console.log(JSON.stringify(output, null, 2));

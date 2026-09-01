@@ -291,7 +291,7 @@ const deterministicEvaluationNode = workflow.nodes.find((node) =>
 );
 if (deterministicEvaluationNode) Object.assign(deterministicEvaluationNode, deterministicEvaluationDefinition);
 else workflow.nodes.push(deterministicEvaluationDefinition);
-workflow.nodes = workflow.nodes.filter((node) => !["Mit DeepSeek bewerten", "Evaluationsbewertung lesen"].includes(node.name));
+workflow.nodes = workflow.nodes.filter((node) => !["Mit GLM 5.3 Flash bewerten", "Evaluationsbewertung lesen"].includes(node.name));
 
 const existingOutputsNode = workflow.nodes.find((node) => node.name === setOutputsName)
   ?? workflow.nodes.find((node) => node.name === "Evaluation" && node.type === "n8n-nodes-base.evaluation");
@@ -424,7 +424,7 @@ workflow.connections[setMetricsName] = { main: [[{ node: manualResultName, type:
 workflow.connections[manualResultName] = { main: [[]] };
 delete workflow.connections.Evaluation;
 delete workflow.connections["Evaluationsbewertung vorbereiten"];
-delete workflow.connections["Mit DeepSeek bewerten"];
+delete workflow.connections["Mit GLM 5.3 Flash bewerten"];
 delete workflow.connections["Evaluationsbewertung lesen"];
 
 const storage = workflow.nodes.find((node) => node.name === "Zertifikat zwischenspeichern");
@@ -439,7 +439,7 @@ mineruReply.parameters.jsCode = mineruReply.parameters.jsCode.replace(
   "let original;\ntry { original = $('Einordnung lesen').first().json; } catch { original = $('Evaluations-PDF vorbereiten').first().json; }\nif (original.evaluationRun) return [];"
 );
 
-const evidenceLoop = workflow.nodes.find((node) => node.name === "DeepSeek-Belegblöcke nacheinander");
+const evidenceLoop = workflow.nodes.find((node) => node.name === "GLM 5.3 Flash-Belegblöcke nacheinander");
 if (evidenceLoop) evidenceLoop.parameters.batchSize = 1;
 
 const deckCertificateRule = "Reine ISO-/TÜV-/DVGW-, Zulassungs- und QM-Zertifikate ohne positionsbezogene Schmelze sind Referenzanlagen und niemals das Deckzeugnis. certificateNumber muss das Prüf-/Werkstoffzeugnis identifizieren, das unmittelbar zu Produktposition und Schmelze gehört; Zulassungsnummern dürfen es nicht ersetzen. Zweisprachig wiederholte Positionen zählen genau einmal.";
@@ -545,6 +545,121 @@ if (evidencePreparation) {
 
 const pdfUploadPreparation = workflow.nodes.find((node) => node.name === "PDF-Upload vorbereiten");
 if (pdfUploadPreparation) {
+  const classicXrefNormalizationCode = String.raw`function parseClassicXref(pdf, xrefOffset) {
+  const source = ascii(pdf, xrefOffset, pdf.length);
+  const header = source.match(/^xref[ \t]*(?:\r\n|\n|\r)/);
+  if (!header) return null;
+  let cursor = header[0].length;
+  const entries = new Map();
+  while (cursor < source.length) {
+    while (/[ \t\r\n]/.test(source[cursor] ?? '')) cursor++;
+    if (source.slice(cursor).startsWith('trailer')) break;
+    const subsection = source.slice(cursor).match(/^(\d+)[ \t]+(\d+)[ \t]*(?:\r\n|\n|\r)/);
+    if (!subsection) throw new Error('Invalid classic XRef subsection at byte ' + (xrefOffset + cursor));
+    const firstObject = Number(subsection[1]);
+    const count = Number(subsection[2]);
+    cursor += subsection[0].length;
+    for (let index = 0; index < count; index++) {
+      const row = source.slice(cursor).match(/^(\d{10})[ \t]+(\d{5})[ \t]+([nf])[ \t]*(?:\r\n|\n|\r)/);
+      if (!row) throw new Error('Invalid classic XRef row for object ' + (firstObject + index));
+      entries.set(firstObject + index, {
+        type: row[3] === 'n' ? 1 : 0,
+        field2: Number(row[1]),
+        field3: Number(row[2]),
+      });
+      cursor += row[0].length;
+    }
+  }
+  const trailerMatch = source.slice(cursor).match(/^trailer\s*(<<[\s\S]*>>)\s*startxref\b/);
+  if (!trailerMatch) throw new Error('Classic XRef trailer not found');
+  return { entries, trailerDict: trailerMatch[1] };
+}
+
+function classicXrefEntryMatches(pdf, number, entry) {
+  if (entry.field2 <= 0 || entry.field2 >= pdf.length) return false;
+  const probe = ascii(pdf, entry.field2, Math.min(pdf.length, entry.field2 + 80));
+  return new RegExp('^' + number + '\\s+' + entry.field3 + '\\s+obj\\b').test(probe);
+}
+
+function hasInvalidClassicXref(pdf, xrefOffset) {
+  const parsed = parseClassicXref(pdf, xrefOffset);
+  if (!parsed) return false;
+  return [...parsed.entries].some(([number, entry]) => entry.type === 1 && !classicXrefEntryMatches(pdf, number, entry));
+}
+
+function normalizeClassicXrefPdf(input, xrefOffset) {
+  const pdf = new Uint8Array(input);
+  const parsed = parseClassicXref(pdf, xrefOffset);
+  if (!parsed) throw new Error('Expected a classic XRef table');
+  if (/\/(?:Encrypt|Prev|XRefStm)\b/.test(parsed.trailerDict)) {
+    throw new Error('Encrypted, incremental, or hybrid classic XRef PDFs are not supported for repair');
+  }
+  const validEntries = [...parsed.entries]
+    .filter(([, entry]) => entry.type === 1 && entry.field2 > 0)
+    .map(([number, entry]) => {
+      if (!classicXrefEntryMatches(pdf, number, entry)) throw new Error('Classic XRef entry ' + number + ' points to the wrong object');
+      return { number, entry };
+    })
+    .sort((left, right) => left.entry.field2 - right.entry.field2);
+  if (!validEntries.length) throw new Error('Classic XRef table contains no valid objects');
+
+  const objects = new Map();
+  for (let index = 0; index < validEntries.length; index++) {
+    const { number, entry } = validEntries[index];
+    const nextOffset = validEntries[index + 1]?.entry.field2 ?? xrefOffset;
+    const object = parseDirectObject(pdf, entry.field2, nextOffset);
+    if (object.number !== number || object.generation !== entry.field3) {
+      throw new Error('Classic XRef object identity mismatch for object ' + number);
+    }
+    objects.set(number, object);
+  }
+
+  const rootMatch = parsed.trailerDict.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+  if (!rootMatch) throw new Error('Root catalog missing from classic XRef trailer');
+  const rootNumber = Number(rootMatch[1]);
+  if (!objects.has(rootNumber)) throw new Error('Root catalog object missing from classic XRef table');
+  const declaredSize = Number(parsed.trailerDict.match(/\/Size\s+(\d+)\b/)?.[1] ?? 0);
+  const maxNumber = Math.max(declaredSize - 1, ...objects.keys());
+  const chunks = [];
+  let byteLength = 0;
+  const push = value => {
+    const bytes = typeof value === 'string' ? Buffer.from(value, 'latin1') : Buffer.from(value);
+    chunks.push(bytes);
+    byteLength += bytes.length;
+  };
+  const version = ascii(pdf, 0, 16).match(/^%PDF-\d\.\d/)?.[0] ?? '%PDF-1.7';
+  push(version + '\n%\xE2\xE3\xCF\xD3\n');
+  const offsets = new Array(maxNumber + 1).fill(0);
+  const generations = new Array(maxNumber + 1).fill(0);
+  for (const number of [...objects.keys()].sort((left, right) => left - right)) {
+    const object = objects.get(number);
+    offsets[number] = byteLength;
+    generations[number] = object.generation;
+    push(number + ' ' + object.generation + ' obj');
+    push(object.body);
+    if (!ascii(object.body).endsWith('\n')) push('\n');
+    push('endobj\n');
+  }
+  const newXrefOffset = byteLength;
+  push('xref\n0 ' + (maxNumber + 1) + '\n');
+  push('0000000000 65535 f \n');
+  for (let number = 1; number <= maxNumber; number++) {
+    const inUse = offsets[number] > 0;
+    push(String(offsets[number]).padStart(10, '0') + ' ' + String(generations[number]).padStart(5, '0') + ' ' + (inUse ? 'n' : 'f') + ' \n');
+  }
+  const info = parsed.trailerDict.match(/\/Info\s+\d+\s+\d+\s+R/)?.[0];
+  const id = parsed.trailerDict.match(/\/ID\s*\[[\s\S]*?\]/)?.[0];
+  push('trailer\n<< /Size ' + (maxNumber + 1) + ' /Root ' + rootMatch[1] + ' ' + rootMatch[2] + ' R' + (info ? ' ' + info : '') + (id ? ' ' + id : '') + ' >>\nstartxref\n' + newXrefOffset + '\n%%EOF\n');
+  return Buffer.concat(chunks);
+}
+
+`;
+  if (!pdfUploadPreparation.parameters.jsCode.includes("function parseClassicXref")) {
+    pdfUploadPreparation.parameters.jsCode = pdfUploadPreparation.parameters.jsCode.replace(
+      "async function normalizePdf(input) {",
+      classicXrefNormalizationCode + "async function normalizePdf(input) {",
+    );
+  }
   if (!pdfUploadPreparation.parameters.jsCode.includes("function normalizeLandscapeScanRotation")) {
     pdfUploadPreparation.parameters.jsCode = pdfUploadPreparation.parameters.jsCode.replace(
       "const item = $input.first();",
@@ -573,10 +688,6 @@ if (pdfUploadPreparation) {
       "uploadPdfBuffer = Buffer.from(uploadSourceBuffer);"
     )
     .replace(
-      "pdfNormalization: needsStructuralRewrite ? (pdfNormalizationError ? 'rewrite-failed-fallback-original' : 'object-streams-to-classic-xref') : 'not-required',\n      pdfNormalizationError",
-      "pdfNormalization: needsStructuralRewrite ? (pdfNormalizationError ? 'rewrite-failed-fallback-original' : 'object-streams-to-classic-xref') : 'not-required',\n      pdfNormalizationError,\n      rotationNormalization: rotationNormalization.applied ? 'landscape-scan-270-to-180' : 'not-required',\n      rotationNormalizedPages: rotationNormalization.pageCount"
-    )
-    .replace(
       "const uploadPdfBuffer = needsStructuralRewrite\n  ? await normalizePdf(pdfBuffer)\n  : Buffer.from(pdfBuffer);",
       "let pdfNormalizationError = null;\nlet uploadPdfBuffer;\nif (needsStructuralRewrite) {\n  try {\n    uploadPdfBuffer = await normalizePdf(pdfBuffer);\n  } catch (error) {\n    pdfNormalizationError = String(error?.message ?? error);\n    uploadPdfBuffer = Buffer.from(pdfBuffer);\n  }\n} else {\n  uploadPdfBuffer = Buffer.from(pdfBuffer);\n}"
     )
@@ -588,6 +699,31 @@ if (pdfUploadPreparation) {
       /pdfNormalizationApplied: needsStructuralRewrite(?: && !pdfNormalizationError)+/,
       "pdfNormalizationApplied: needsStructuralRewrite && !pdfNormalizationError"
     );
+  if (!pdfUploadPreparation.parameters.jsCode.includes("rotationNormalizedPages:")) {
+    pdfUploadPreparation.parameters.jsCode = pdfUploadPreparation.parameters.jsCode.replace(
+      "pdfNormalizationError\n    }),",
+      "pdfNormalizationError,\n      rotationNormalization: rotationNormalization.applied ? 'landscape-scan-270-to-180' : 'not-required',\n      rotationNormalizedPages: rotationNormalization.pageCount\n    }),",
+    );
+  }
+  pdfUploadPreparation.parameters.jsCode = pdfUploadPreparation.parameters.jsCode.replace(
+    /(?:\n      rotationNormalization: rotationNormalization\.applied \? 'landscape-scan-270-to-180' : 'not-required',\n      rotationNormalizedPages: rotationNormalization\.pageCount,?)+/g,
+    "\n      rotationNormalization: rotationNormalization.applied ? 'landscape-scan-270-to-180' : 'not-required',\n      rotationNormalizedPages: rotationNormalization.pageCount",
+  );
+  if (!pdfUploadPreparation.parameters.jsCode.includes("const xrefStreamRewrite =")) {
+    pdfUploadPreparation.parameters.jsCode = pdfUploadPreparation.parameters.jsCode
+      .replace(
+        "const needsStructuralRewrite = /^\\d+\\s+\\d+\\s+obj\\b[\\s\\S]*?\\/Type\\s*\\/XRef\\b/.test(xrefProbe);",
+        "const xrefStreamRewrite = /^\\d+\\s+\\d+\\s+obj\\b[\\s\\S]*?\\/Type\\s*\\/XRef\\b/.test(xrefProbe);\nconst invalidClassicXref = !xrefStreamRewrite && hasInvalidClassicXref(uploadSourceBuffer, xrefOffset);\nconst needsStructuralRewrite = xrefStreamRewrite || invalidClassicXref;\nconst pdfNormalizationKind = xrefStreamRewrite ? 'object-streams-to-classic-xref' : invalidClassicXref ? 'invalid-classic-xref-rebuilt' : 'not-required';",
+      )
+      .replace(
+        "uploadPdfBuffer = await normalizePdf(uploadSourceBuffer);",
+        "uploadPdfBuffer = invalidClassicXref ? normalizeClassicXrefPdf(uploadSourceBuffer, xrefOffset) : await normalizePdf(uploadSourceBuffer);",
+      )
+      .replace(
+        "pdfNormalization: needsStructuralRewrite ? (pdfNormalizationError ? 'rewrite-failed-fallback-original' : 'object-streams-to-classic-xref') : 'not-required',",
+        "pdfNormalization: needsStructuralRewrite ? (pdfNormalizationError ? 'rewrite-failed-fallback-original' : pdfNormalizationKind) : 'not-required',",
+      );
+  }
 }
 
 const finalValidation = workflow.nodes.find((node) => node.name === "Ergebnis validieren und Dokumentenreview vorbereiten");

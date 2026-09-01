@@ -206,7 +206,7 @@
           "value": "oLtOyTcKU11RrNJC",
           "mode": "list",
           "cachedResultUrl": "/workflow/oLtOyTcKU11RrNJC",
-          "cachedResultName": "Outlook Certificate Analysis (MinerU + DeepSeek)"
+          "cachedResultName": "Outlook Certificate Analysis (MinerU + GLM 5.3 Flash)"
         },
         "workflowInputs": {
           "mappingMode": "defineBelow",
@@ -264,7 +264,7 @@
     },
     {
       "parameters": {
-        "content": "## Outlook-basierte Queue\n- höchstens 5 Mails mit `DAIMENSION-PROCESSING`\n- weitere Mails bleiben ungelesen\n- Worker werden pro Mail separat gestartet\n- eine verwaiste Bearbeitung wird nach 15 Minuten erneut versucht\n- laufende MinerU- und DeepSeek-Schritte erneuern die Bearbeitungslease\n- nach 3 Versuchen bleibt die Mail ungelesen und erhält `DAIMENSION-FAILED`\n- beim ersten Start werden ungelesene Mails der letzten 24 Stunden berücksichtigt",
+        "content": "## Outlook-basierte Queue\n- höchstens 5 Mails mit `DAIMENSION-PROCESSING`\n- weitere Mails bleiben ungelesen\n- Worker werden pro Mail separat gestartet\n- eine verwaiste Bearbeitung wird nach 15 Minuten erneut versucht\n- laufende MinerU- und GLM 5.3 Flash-Schritte erneuern die Bearbeitungslease\n- nach 3 Versuchen bleibt die Mail ungelesen und erhält `DAIMENSION-FAILED`\n- beim ersten Start werden ungelesene Mails der letzten 24 Stunden berücksichtigt",
         "height": 360,
         "width": 520,
         "color": 5
@@ -605,7 +605,7 @@
             "value": "oLtOyTcKU11RrNJC",
             "mode": "list",
             "cachedResultUrl": "/workflow/oLtOyTcKU11RrNJC",
-            "cachedResultName": "Outlook Certificate Analysis (MinerU + DeepSeek)"
+            "cachedResultName": "Outlook Certificate Analysis (MinerU + GLM 5.3 Flash)"
           },
           "workflowInputs": {
             "mappingMode": "defineBelow",
@@ -663,7 +663,7 @@
       },
       {
         "parameters": {
-          "content": "## Outlook-basierte Queue\n- höchstens 5 Mails mit `DAIMENSION-PROCESSING`\n- weitere Mails bleiben ungelesen\n- Worker werden pro Mail separat gestartet\n- eine verwaiste Bearbeitung wird nach 15 Minuten erneut versucht\n- laufende MinerU- und DeepSeek-Schritte erneuern die Bearbeitungslease\n- nach 3 Versuchen bleibt die Mail ungelesen und erhält `DAIMENSION-FAILED`\n- beim ersten Start werden ungelesene Mails der letzten 24 Stunden berücksichtigt",
+          "content": "## Outlook-basierte Queue\n- höchstens 5 Mails mit `DAIMENSION-PROCESSING`\n- weitere Mails bleiben ungelesen\n- Worker werden pro Mail separat gestartet\n- eine verwaiste Bearbeitung wird nach 15 Minuten erneut versucht\n- laufende MinerU- und GLM 5.3 Flash-Schritte erneuern die Bearbeitungslease\n- nach 3 Versuchen bleibt die Mail ungelesen und erhält `DAIMENSION-FAILED`\n- beim ersten Start werden ungelesene Mails der letzten 24 Stunden berücksichtigt",
           "height": 360,
           "width": 520,
           "color": 5
