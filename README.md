@@ -105,7 +105,11 @@ document and extracted values side by side at `/document-review`, correct the
 editable review payload, add comments, and approve the result. The original
 extraction remains preserved as the immutable source payload. Every imported
 row starts with `humanRequired=true`, so human confirmation is required;
-materials and norms remain part of the fields being checked. Immediately after successful PDF
+materials and norms remain part of the fields being checked. Tensile tests use
+the Document Review schema-v2 structure: up to twelve tests stay in document
+order, with sample number, temperature, typed yield strengths, tensile strength,
+all elongation definitions, and specimen metadata coupled per specimen. Values
+from different specimens are never collapsed into field-wise minima. Immediately after successful PDF
 extraction, the certificate sender receives the detected text, Markdown, or
 JSON in the reply body and as a complete attachment; the final structured JSON
 is sent in a separate Outlook reply. There is no pairing with a counterpart
@@ -161,17 +165,20 @@ as real email certificates.
 
 After extraction, `Evaluation deterministisch bewerten` compares only the facts
 in `expectedAnswer` with the actual structured result. Numeric values use a
-small explicit tolerance; arrays of comparable mechanical measurements resolve
-to the same minimum-value policy used by production. Multi-position rows are
-matched by heat and dimensions. Every evaluation position also contains the
+small explicit tolerance. Structured tensile tests are compared in document
+order and per specimen, including typed yield-strength and elongation
+measurements, so numerically correct but incorrectly paired values fail the
+evaluation. Multi-position rows are matched by heat and dimensions. Every
+evaluation position also contains the
 expected heat-analysis chemistry. Chemical measurements are compared element
 by element with a strict numeric tolerance and must remain assigned to the
 correct heat. Missing, incorrectly scaled, or wrong-heat chemical values set
 `chemistryPassed=0` and always invalidate the complete evaluation run.
 `Evaluation – Ergebnis speichern` writes `actualAnswer`, `judgeScore`,
 `judgeReasoning`, `chemistryScore`, `chemistryReasoning`, `chemistryPassed`, and
-`passed` back to the dataset. `Evaluation – Metriken setzen` records
-`correctness`, `Chemistry score`, `Chemistry pass rate`, and `Pass rate` in
+`tensileScore`, `tensileReasoning`, `tensilePassed`, and `passed` back to the
+dataset. `Evaluation – Metriken setzen` records `correctness`, `Chemistry score`,
+`Chemistry pass rate`, `Tensile-test score`, `Tensile-test pass rate`, and `Pass rate` in
 n8n's Evaluations tab. The extraction model does not grade its own answer.
 Evaluation executions
 do not create document reviews or send/update Outlook messages.
@@ -228,7 +235,8 @@ The regression checks the source values, compiles every n8n Code node, executes
 the evidence-block and critical-source selection, repairs common malformed LLM
 JSON responses, and verifies position-preserving chemical and dimension
 normalization. The nine-case suite additionally rejects missing chemical
-elements, decimal-scale errors, and chemistry assigned to the wrong heat.
+elements, decimal-scale errors, chemistry assigned to the wrong heat, missing
+tensile tests, and tensile measurements assigned to the wrong specimen.
 
 Before activation, configure the Microsoft Outlook OAuth2 credential on the
 dispatcher and all worker reply/update nodes. The credential needs

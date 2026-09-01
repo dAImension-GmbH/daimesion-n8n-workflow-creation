@@ -21,6 +21,9 @@ const REQUIRED_COLUMNS = [
   { name: "chemistryScore", type: "number" },
   { name: "chemistryReasoning", type: "string" },
   { name: "chemistryPassed", type: "number" },
+  { name: "tensileScore", type: "number" },
+  { name: "tensileReasoning", type: "string" },
+  { name: "tensilePassed", type: "number" },
   { name: "passed", type: "number" }
 ];
 
@@ -123,6 +126,9 @@ for (const testCase of cases) {
       chemistryScore: 0,
       chemistryReasoning: "Not evaluated after latest setup",
       chemistryPassed: 0,
+      tensileScore: 0,
+      tensileReasoning: "Not evaluated after latest setup",
+      tensilePassed: 0,
       passed: 0
     };
   }

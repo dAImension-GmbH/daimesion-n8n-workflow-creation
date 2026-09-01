@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { deterministicEvaluationCode } from "./certificate-evaluator-code.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PDF_DIR = process.env.CERTIFICATE_PDF_DIR || "/Users/mdklause/Downloads";
@@ -18,30 +19,37 @@ for (const node of workflow.nodes.filter((entry) => entry.type === "n8n-nodes-ba
 }
 
 if (!evaluator) throw new Error("Deterministic certificate evaluator is missing from the workflow. Run npm run prepare:evaluations.");
+if (evaluator !== deterministicEvaluationCode) throw new Error("The embedded deterministic evaluator is out of sync with scripts/certificate-evaluator-code.js.");
 if (cases.length !== 9) throw new Error(`Expected nine certificate cases, found ${cases.length}.`);
 for (const nodeName of ["Zeugnis in Belegblöcke teilen", "Belege sammeln und Normalisierung bauen", "Qualitätsprüfung vorbereiten"]) {
   const code = workflow.nodes.find((node) => node.name === nodeName)?.parameters?.jsCode ?? "";
   if (!code.includes("Zulassungsnummern dürfen es nicht ersetzen")) throw new Error(`${nodeName}: approval-certificate exclusion is missing.`);
   if (!code.includes("das früheste Abnahmeprüfzeugnis")) throw new Error(`${nodeName}: cover-certificate precedence rule is missing.`);
-  if (!code.includes("Mechanische Istwerte niemals runden")) throw new Error(`${nodeName}: specimen-location rule is missing.`);
-  if (!code.includes("yieldStrength10 den kleinsten dieser belegten Istwerte")) throw new Error(`${nodeName}: Rp1.0 extraction rule is missing.`);
+  if (!code.includes("Jeder Prüfkörper") && !code.includes("Jeder Prüfkörper bleibt")) throw new Error(`${nodeName}: per-specimen tensile-test rule is missing.`);
+  if (!code.includes("niemals minimieren") && !code.includes("niemals zu feldweisen Minima") && !code.includes("niemals feldweise Minima")) throw new Error(`${nodeName}: cross-specimen minimum prohibition is missing.`);
   if (!code.includes("Bei parallel angeordneten Mechanikspalten")) throw new Error(`${nodeName}: paired mechanical-column rule is missing.`);
-  if (!code.includes("isPrimaryAcceptanceBlock=true nur")) throw new Error(`${nodeName}: primary acceptance-block rule is missing.`);
   if (!code.includes("Bestell-Nr./Customer Order/P.O.")) throw new Error(`${nodeName}: header-label disambiguation rule is missing.`);
   if (!code.includes("Werkstoffspezifikationen, die in der Material-/B02-Zeile stehen")) throw new Error(`${nodeName}: material-standard extraction rule is missing.`);
-  if (code.includes("den kleinsten Wert")) throw new Error(`${nodeName}: obsolete cross-location minimum rule is still present.`);
+  if (code.includes("feldweise Minimum gebildet")) throw new Error(`${nodeName}: obsolete cross-specimen minimum rule is still present.`);
 }
 const extractionCode = workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen")?.parameters?.jsCode ?? "";
-if (!extractionCode.includes("gaugeLengthType") || !extractionCode.includes("yieldStrength10Explicit")) {
-  throw new Error("Evidence extraction does not preserve tensile-test gauge and Rp1.0 column provenance.");
+if (!extractionCode.includes("sampleNumber") || !extractionCode.includes("yieldStrengths") || !extractionCode.includes("elongations")) {
+  throw new Error("Evidence extraction does not preserve the structured tensile-test contract.");
 }
 if (!extractionCode.includes("Mehrzeilige Tabellenzellen sind mehrere Prüfzeilen")) {
   throw new Error("Evidence extraction does not split vertically stacked mechanical values into separate test rows.");
 }
+if (!extractionCode.includes("isPrimaryAcceptanceBlock")) {
+  throw new Error("Evidence extraction does not retain the acceptance-block trace.");
+}
 for (const nodeName of ["Belege sammeln und Normalisierung bauen", "Qualitätsprüfung vorbereiten"]) {
   const code = workflow.nodes.find((node) => node.name === nodeName)?.parameters?.jsCode ?? "";
-  if (!code.includes("mechanicalSelection") || !code.includes("feldweise Minimum")) throw new Error(`${nodeName}: deterministic mechanical trace contract is missing.`);
+  if (!code.includes("tensileTests") || !code.includes("yieldStrengths") || !code.includes("elongations")) throw new Error(`${nodeName}: structured tensile-test contract is missing.`);
   if (!code.includes("deckSelection") || !code.includes("documentRole=DECK")) throw new Error(`${nodeName}: deterministic deck-certificate trace contract is missing.`);
+}
+const reviewUploadCode = workflow.nodes.find((node) => node.name === "Dokumentenreview-Upload vorbereiten")?.parameters?.jsCode ?? "";
+if (!reviewUploadCode.includes("tensileTests") || /yieldStrength02:\s*row\./.test(reviewUploadCode)) {
+  throw new Error("Document Review upload does not use the current structured tensile-test API contract.");
 }
 const uploadCode = workflow.nodes.find((node) => node.name === "PDF-Upload vorbereiten")?.parameters?.jsCode ?? "";
 if (!uploadCode.includes("normalizeLandscapeScanRotation") || !uploadCode.includes("landscape-scan-270-to-180") || !uploadCode.includes("hasPortraitScannerPage")) {
@@ -131,16 +139,12 @@ if (!healthyClassicItem?.binary?.data?.buffer?.equals(healthyClassicPdf) || heal
 const mineruErrorCode = workflow.nodes.find((node) => node.name === "MinerU-Fehler vorbereiten")?.parameters?.jsCode ?? "";
 if (!mineruErrorCode.includes("Evaluations-PDF vorbereiten")) throw new Error("MinerU error handling is not safe on the evaluation branch.");
 
-const scalar = (value) => Array.isArray(value) ? Math.min(...value) : value;
 const actualFor = (testCase) => ({
   correlationKey: testCase.correlationKey,
   results: testCase.expected.positions.map((position) => ({
     heatNumber: position.heatNumber,
     quantity: position.quantity,
-    yieldStrength02: position.yieldStrength02 === undefined ? -1 : scalar(position.yieldStrength02),
-    yieldStrength10: position.yieldStrength10 === undefined ? -1 : scalar(position.yieldStrength10),
-    tensileStrength: position.tensileStrength === undefined ? -1 : scalar(position.tensileStrength),
-    elongation: position.elongation === undefined ? -1 : scalar(position.elongation),
+    tensileTests: structuredClone(position.tensileTests),
     certificateNumber: testCase.expected.certificateNumber,
     rawMaterialCertificate: testCase.expected.rawMaterialCertificate ?? "-1",
     customerOrderNumber: testCase.expected.customerOrderNumber,
@@ -181,6 +185,21 @@ for (const testCase of cases) {
     if (!position.chemicals || Object.keys(position.chemicals).length === 0) {
       throw new Error(`${testCase.caseId}/${position.heatNumber}: chemical ground truth is missing.`);
     }
+    if (!Array.isArray(position.tensileTests) || position.tensileTests.length < 1 || position.tensileTests.length > 12) {
+      throw new Error(`${testCase.caseId}/${position.heatNumber}: one to twelve structured tensile tests are required.`);
+    }
+    for (const [testIndex, tensileTest] of position.tensileTests.entries()) {
+      if (!Array.isArray(tensileTest.yieldStrengths) || !Array.isArray(tensileTest.elongations)) {
+        throw new Error(`${testCase.caseId}/${position.heatNumber}/tensileTests[${testIndex}]: measurement arrays are missing.`);
+      }
+      const yieldTypes = tensileTest.yieldStrengths.map((measurement) => measurement.type);
+      if (yieldTypes.some((type) => !["Rp0.2", "Rp1.0", "ReH", "ReL"].includes(type)) || new Set(yieldTypes).size !== yieldTypes.length) {
+        throw new Error(`${testCase.caseId}/${position.heatNumber}/tensileTests[${testIndex}]: invalid or duplicate yield-strength type.`);
+      }
+      if (tensileTest.tensileStrengthMPa !== undefined && tensileTest.yieldStrengths.some((measurement) => measurement.valueMPa > tensileTest.tensileStrengthMPa)) {
+        throw new Error(`${testCase.caseId}/${position.heatNumber}/tensileTests[${testIndex}]: yield strength exceeds Rm.`);
+      }
+    }
   }
   const pdfPath = path.join(PDF_DIR, testCase.fileName);
   const pdf = readFileSync(pdfPath);
@@ -191,7 +210,7 @@ for (const testCase of cases) {
 
   const actual = actualFor(testCase);
   const positive = (await evaluate(testCase, actual))[0]?.json;
-  if (positive?.passed !== 1 || positive?.score !== 5 || positive?.correctness !== 1 || positive?.chemistryPassed !== 1 || positive?.chemistryScore !== 1) {
+  if (positive?.passed !== 1 || positive?.score !== 5 || positive?.correctness !== 1 || positive?.chemistryPassed !== 1 || positive?.chemistryScore !== 1 || positive?.tensilePassed !== 1 || positive?.tensileScore !== 1) {
     throw new Error(`${testCase.caseId}: valid result did not pass: ${positive?.reasoning}`);
   }
 
@@ -219,6 +238,14 @@ for (const testCase of cases) {
   if (missingRejected?.passed !== 0 || missingRejected?.chemistryPassed !== 0) {
     throw new Error(`${testCase.caseId}: missing chemical value was not a hard failure.`);
   }
+
+  const wrongTensilePair = structuredClone(actual);
+  const tests = wrongTensilePair.results[0].tensileTests;
+  tests[0].tensileStrengthMPa = Number(tests[0].tensileStrengthMPa ?? 0) + 1;
+  const tensileRejected = (await evaluate(testCase, wrongTensilePair))[0]?.json;
+  if (tensileRejected?.passed !== 0 || tensileRejected?.tensilePassed !== 0 || tensileRejected?.tensileScore >= 1 || tensileRejected?.score > 3) {
+    throw new Error(`${testCase.caseId}: broken tensile-test pairing was not a hard failure.`);
+  }
 }
 
 const unicornCase = cases.find((entry) => entry.caseId === "unicorn-2026-102898");
@@ -228,6 +255,40 @@ const swappedRejected = (await evaluate(unicornCase, swappedChemistry))[0]?.json
 if (swappedRejected?.passed !== 0 || swappedRejected?.chemistryPassed !== 0) {
   throw new Error("Chemical values assigned to the wrong heat were not rejected.");
 }
+
+const unicornAliases = actualFor(unicornCase);
+unicornAliases.results[0].tensileTests[0].orientation = "quer (transversal)";
+unicornAliases.results[0].tensileTests[0].elongations[1].type = "A2\"";
+unicornAliases.results[1].tensileTests[0].specimenLocation = "12,5 mm vom Außenradius";
+unicornAliases.results[1].tensileTests[0].elongations[0].type = "A5d";
+unicornAliases.results[1].tensileTests[1].elongations[0].type = "A5d";
+unicornAliases.results[1].tensileTests[2].specimenLocation = "1/2 vom Radius";
+unicornAliases.results[1].tensileTests[2].elongations[0].type = "A4d";
+const unicornAliasResult = (await evaluate(unicornCase, unicornAliases))[0]?.json;
+if (unicornAliasResult?.passed !== 1) throw new Error(`Equivalent German tensile labels were rejected: ${unicornAliasResult?.reasoning}`);
+
+const venusCase = cases.find((entry) => entry.caseId === "venus-vptl-exp-mtc-26-1233");
+const venusAliases = actualFor(venusCase);
+for (const test of venusAliases.results[0].tensileTests) {
+  test.elongations[0].type = "A";
+  test.elongations[1].type = "A";
+}
+const venusAliasResult = (await evaluate(venusCase, venusAliases))[0]?.json;
+if (venusAliasResult?.passed !== 1) throw new Error(`Equivalent Venus elongation labels were rejected: ${venusAliasResult?.reasoning}`);
+
+const venusLiveLabels = actualFor(venusCase);
+for (const test of venusLiveLabels.results[0].tensileTests) {
+  test.elongations[0].type = "% Elongation (Wert 1)";
+  test.elongations[1].type = "% Elongation (Wert 2)";
+}
+const venusLiveLabelResult = (await evaluate(venusCase, venusLiveLabels))[0]?.json;
+if (venusLiveLabelResult?.passed !== 1) throw new Error(`Live Venus elongation labels were rejected: ${venusLiveLabelResult?.reasoning}`);
+
+const jmdCase = cases.find((entry) => entry.caseId === "jmd-100000125315");
+const jmdAliases = actualFor(jmdCase);
+jmdAliases.results[0].tensileTests[0].elongations[0].type = "A (Dehng. C13 / Elongation %)";
+const jmdAliasResult = (await evaluate(jmdCase, jmdAliases))[0]?.json;
+if (jmdAliasResult?.passed !== 1) throw new Error(`Generic JMD source elongation label was rejected: ${jmdAliasResult?.reasoning}`);
 
 for (const [caseId, equivalentProduct] of [
   ["starofit-26030318", "Exzentrisches Reduzierstück, DIN EN 10253-2:2021-11 Typ A, nahtlos"],

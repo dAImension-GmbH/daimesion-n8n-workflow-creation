@@ -9,8 +9,138 @@
       "customerOrderNumber": "PO-25-RFS003046",
       "creditor": "Unicorn GmbH Tailormade Processing",
       "positions": [
-        { "heatNumber": "475670", "quantity": 2, "dimensions": "193.7 x 22.2 mm", "material": "1.4541", "yieldStrength02": 233, "yieldStrength10": 278, "tensileStrength": 529, "elongation": 42.9, "chemicals": { "C": 0.044, "SI": 0.24, "MN": 1.27, "P": 0.036, "S": 0.005, "CR": 17.6, "MO": 0.42, "NI": 9.84, "CU": 0.38, "V": 0.05, "W": 0.04, "CO": 0.18, "AL": 0.045, "N": 0.0094, "TI": 0.43 } },
-        { "heatNumber": "901972", "quantity": 2, "dimensions": "133.0 x 14.2 mm", "material": "1.4541", "yieldStrength02": 259, "yieldStrength10": 293, "elongation": 50.1, "chemicals": { "C": 0.043, "MN": 1.59, "SI": 0.406, "P": 0.031, "S": 0.021, "CR": 17.11, "NI": 9.06, "CO": 0.249, "TI": 0.436, "N": 0.01 } }
+        {
+          "heatNumber": "475670",
+          "quantity": 2,
+          "dimensions": "193.7 x 22.2 mm",
+          "material": "1.4541",
+          "chemicals": {
+            "C": 0.044,
+            "SI": 0.24,
+            "MN": 1.27,
+            "P": 0.036,
+            "S": 0.005,
+            "CR": 17.6,
+            "MO": 0.42,
+            "NI": 9.84,
+            "CU": 0.38,
+            "V": 0.05,
+            "W": 0.04,
+            "CO": 0.18,
+            "AL": 0.045,
+            "N": 0.0094,
+            "TI": 0.43
+          },
+          "tensileTests": [
+            {
+              "sampleNumber": "41720",
+              "testTemperatureC": 23,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 233
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 278
+                }
+              ],
+              "tensileStrengthMPa": 529,
+              "elongations": [
+                {
+                  "type": "A5",
+                  "valuePercent": 42.9
+                },
+                {
+                  "type": "2IN",
+                  "valuePercent": 47.9
+                }
+              ],
+              "reductionOfAreaPercent": 51,
+              "orientation": "transverse",
+              "specimenDimensions": "Ø 12.5 mm"
+            }
+          ]
+        },
+        {
+          "heatNumber": "901972",
+          "quantity": 2,
+          "dimensions": "133.0 x 14.2 mm",
+          "material": "1.4541",
+          "chemicals": {
+            "C": 0.043,
+            "MN": 1.59,
+            "SI": 0.406,
+            "P": 0.031,
+            "S": 0.021,
+            "CR": 17.11,
+            "NI": 9.06,
+            "CO": 0.249,
+            "TI": 0.436,
+            "N": 0.01
+          },
+          "tensileTests": [
+            {
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 259
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 293
+                }
+              ],
+              "tensileStrengthMPa": 573,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 50.1
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenLocation": "12.5 mm from the surface"
+            },
+            {
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 255
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 290
+                }
+              ],
+              "tensileStrengthMPa": 569,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 50.4
+                }
+              ],
+              "orientation": "longitudinal"
+            },
+            {
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 256
+                }
+              ],
+              "tensileStrengthMPa": 564,
+              "elongations": [
+                {
+                  "type": "4D",
+                  "valuePercent": 51.7
+                }
+              ],
+              "reductionOfAreaPercent": 57,
+              "orientation": "longitudinal",
+              "specimenLocation": "1/2 radius"
+            }
+          ]
+        }
       ]
     }
   },
@@ -22,7 +152,74 @@
     "expected": {
       "certificateNumber": "VPTL/EXP/MTC/26/1233",
       "customerOrderNumber": "PO-24-0012405",
-      "positions": [{ "heatNumber": "N3164", "quantity": 53, "dimensions": "35.00 x 3.00 mm", "material": "TP316Ti / 1.4571", "yieldStrength02": [279.26, 327.21], "yieldStrength10": [301.87, 358.29], "tensileStrength": [608.63, 613.85], "elongation": [63, 64], "chemicals": { "C": 0.02, "SI": 0.45, "MN": 1.62, "P": 0.035, "S": 0.001, "CR": 16.92, "NI": 10.58, "MO": 2.11, "N": 0.022, "TI": 0.26 } }]
+      "positions": [
+        {
+          "heatNumber": "N3164",
+          "quantity": 53,
+          "dimensions": "35.00 x 3.00 mm",
+          "material": "TP316Ti / 1.4571",
+          "chemicals": {
+            "C": 0.02,
+            "SI": 0.45,
+            "MN": 1.62,
+            "P": 0.035,
+            "S": 0.001,
+            "CR": 16.92,
+            "NI": 10.58,
+            "MO": 2.11,
+            "N": 0.022,
+            "TI": 0.26
+          },
+          "tensileTests": [
+            {
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 279.26
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 301.87
+                }
+              ],
+              "tensileStrengthMPa": 608.63,
+              "elongations": [
+                {
+                  "type": "50MM",
+                  "valuePercent": 63
+                },
+                {
+                  "type": "5D",
+                  "valuePercent": 57.53
+                }
+              ]
+            },
+            {
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 327.21
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 358.29
+                }
+              ],
+              "tensileStrengthMPa": 613.85,
+              "elongations": [
+                {
+                  "type": "50MM",
+                  "valuePercent": 64
+                },
+                {
+                  "type": "5D",
+                  "valuePercent": 58.44
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   },
   {
@@ -33,7 +230,67 @@
     "expected": {
       "certificateNumber": "26030318",
       "customerOrderNumber": "PO-26-RFS003506",
-      "positions": [{ "heatNumber": "333691", "quantity": 2, "product": "Eccentric reducer DIN EN 10253-2 Type A", "dimensions": "219.10 x 7.10 / 88.90 x 4.00 mm", "material": "P235GH", "yieldStrength02": 306, "tensileStrength": 447, "elongation": 35, "chemicals": { "C": 0.14, "SI": 0.2, "MN": 0.56, "P": 0.012, "S": 0.001, "AL": 0.027, "CU": 0.04, "CR": 0.07, "MO": 0.02, "NI": 0.06, "TI": 0.002, "V": 0.001, "NB": 0.001, "N": 0.0072, "Cr+Cu+Mo+Ni": 0.19 } }]
+      "positions": [
+        {
+          "heatNumber": "333691",
+          "quantity": 2,
+          "product": "Eccentric reducer DIN EN 10253-2 Type A",
+          "dimensions": "219.10 x 7.10 / 88.90 x 4.00 mm",
+          "material": "P235GH",
+          "chemicals": {
+            "C": 0.14,
+            "SI": 0.2,
+            "MN": 0.56,
+            "P": 0.012,
+            "S": 0.001,
+            "AL": 0.027,
+            "CU": 0.04,
+            "CR": 0.07,
+            "MO": 0.02,
+            "NI": 0.06,
+            "TI": 0.002,
+            "V": 0.001,
+            "NB": 0.001,
+            "N": 0.0072,
+            "Cr+Cu+Mo+Ni": 0.19
+          },
+          "tensileTests": [
+            {
+              "yieldStrengths": [
+                {
+                  "type": "ReH",
+                  "valueMPa": 306
+                }
+              ],
+              "tensileStrengthMPa": 447,
+              "elongations": [
+                {
+                  "type": "A5",
+                  "valuePercent": 35
+                }
+              ]
+            },
+            {
+              "sampleNumber": "3102",
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 301
+                }
+              ],
+              "tensileStrengthMPa": 435,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 37.5
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "20.08 x 07.23 mm"
+            }
+          ]
+        }
+      ]
     }
   },
   {
@@ -44,7 +301,120 @@
     "expected": {
       "certificateNumber": "W089986",
       "customerOrderNumber": "PO-25-0012289",
-      "positions": [{ "heatNumber": "245086", "quantity": 12, "product": "T-piece / tee", "material": "1.4541", "yieldStrength02": 271, "yieldStrength10": 306, "tensileStrength": 547, "elongation": 52.5, "chemicals": { "C": 0.048, "SI": 0.33, "MN": 1.74, "P": 0.038, "S": 0.003, "CR": 17.11, "MO": 0, "NI": 9.1, "CU": 0, "V": 0, "NB": 0, "AL": 0, "TI": 0.51, "N": 0.013 } }]
+      "positions": [
+        {
+          "heatNumber": "245086",
+          "quantity": 12,
+          "product": "T-piece / tee",
+          "material": "1.4541",
+          "chemicals": {
+            "C": 0.048,
+            "SI": 0.33,
+            "MN": 1.74,
+            "P": 0.038,
+            "S": 0.003,
+            "CR": 17.11,
+            "MO": 0,
+            "NI": 9.1,
+            "CU": 0,
+            "V": 0,
+            "NB": 0,
+            "AL": 0,
+            "TI": 0.51,
+            "N": 0.013
+          },
+          "tensileTests": [
+            {
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 284
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 317
+                }
+              ],
+              "tensileStrengthMPa": 547,
+              "elongations": [
+                {
+                  "type": "A5",
+                  "valuePercent": 52.5
+                }
+              ]
+            },
+            {
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 271
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 306
+                }
+              ],
+              "tensileStrengthMPa": 547,
+              "elongations": [
+                {
+                  "type": "A5",
+                  "valuePercent": 52.5
+                }
+              ]
+            },
+            {
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 308.76
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 337.23
+                }
+              ],
+              "tensileStrengthMPa": 553.82,
+              "elongations": [
+                {
+                  "type": "50MM",
+                  "valuePercent": 49.18,
+                  "gaugeLengthMm": 50
+                },
+                {
+                  "type": "5D",
+                  "valuePercent": 43.37
+                }
+              ],
+              "orientation": "longitudinal"
+            },
+            {
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 288.19
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 320.6
+                }
+              ],
+              "tensileStrengthMPa": 548.85,
+              "elongations": [
+                {
+                  "type": "50MM",
+                  "valuePercent": 46.44,
+                  "gaugeLengthMm": 50
+                },
+                {
+                  "type": "5D",
+                  "valuePercent": 42.4
+                }
+              ],
+              "orientation": "longitudinal"
+            }
+          ]
+        }
+      ]
     }
   },
   {
@@ -55,7 +425,132 @@
     "expected": {
       "certificateNumber": "02-25-25339",
       "customerOrderNumber": "PO-25-0007714",
-      "positions": [{ "heatNumber": "938166", "quantity": 13, "dimensions": "114.30 x 16.00 mm", "material": "X10CrMoVNb9-1 / P91 Type 2", "yieldStrength02": [512, 511, 509], "tensileStrength": [679, 683], "elongation": [37.5, 40, 26, 28], "chemicals": { "C": 0.11, "MN": 0.4, "SI": 0.28, "NI": 0.08, "CR": 8.62, "MO": 0.9, "V": 0.2, "CU": 0.07, "P": 0.012, "S": 0.003, "SN": 0.004, "AL": 0.006, "TI": 0.001, "NB": 0.066, "As": 0.005, "N": 0.0588, "B": 0.0003, "Sb": 0.0018, "W": 0.0003, "Zr": 0.0026 } }]
+      "positions": [
+        {
+          "heatNumber": "938166",
+          "quantity": 13,
+          "dimensions": "114.30 x 16.00 mm",
+          "material": "X10CrMoVNb9-1 / P91 Type 2",
+          "chemicals": {
+            "C": 0.11,
+            "MN": 0.4,
+            "SI": 0.28,
+            "NI": 0.08,
+            "CR": 8.62,
+            "MO": 0.9,
+            "V": 0.2,
+            "CU": 0.07,
+            "P": 0.012,
+            "S": 0.003,
+            "SN": 0.004,
+            "AL": 0.006,
+            "TI": 0.001,
+            "NB": 0.066,
+            "As": 0.005,
+            "N": 0.0588,
+            "B": 0.0003,
+            "Sb": 0.0018,
+            "W": 0.0003,
+            "Zr": 0.0026
+          },
+          "tensileTests": [
+            {
+              "sampleNumber": "Q5115/AA",
+              "testTemperatureC": 600,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 256
+                }
+              ],
+              "tensileStrengthMPa": 339,
+              "elongations": [],
+              "orientation": "longitudinal",
+              "specimenDimensions": "6.06 x 16.48 mm"
+            },
+            {
+              "sampleNumber": "Q5115/AA",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 512
+                }
+              ],
+              "tensileStrengthMPa": 679,
+              "elongations": [
+                {
+                  "type": "2IN",
+                  "valuePercent": 37.5,
+                  "gaugeLengthMm": 50
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "25.60 x 16.50 mm"
+            },
+            {
+              "sampleNumber": "Q5116/AA",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 511
+                }
+              ],
+              "tensileStrengthMPa": 683,
+              "elongations": [
+                {
+                  "type": "2IN",
+                  "valuePercent": 40,
+                  "gaugeLengthMm": 50
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "25.52 x 16.05 mm"
+            },
+            {
+              "sampleNumber": "Q5113/AA",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 512
+                }
+              ],
+              "tensileStrengthMPa": 679,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 26,
+                  "gaugeLengthMm": 100
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "20.15 x 16.16 mm"
+            },
+            {
+              "sampleNumber": "Q5114/AA",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 509
+                }
+              ],
+              "tensileStrengthMPa": 679,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 28,
+                  "gaugeLengthMm": 105
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "20.18 x 16.32 mm"
+            }
+          ]
+        }
+      ]
     }
   },
   {
@@ -66,7 +561,86 @@
     "expected": {
       "certificateNumber": "02-26-07006",
       "customerOrderNumber": "PO-25-RFS002563",
-      "positions": [{ "heatNumber": "753932", "quantity": 22, "dimensions": "57.00 x 3.60 mm", "material": "P235GH TC2", "yieldStrength02": [279, 307], "tensileStrength": [416, 425], "elongation": [30.5, 36], "chemicals": { "C": 0.08, "MN": 0.48, "SI": 0.18, "NI": 0.16, "CR": 0.08, "MO": 0.04, "CU": 0.2, "Cr+Cu+Mo+Ni": 0.48, "P": 0.01, "S": 0.003, "SN": 0.012, "AL": 0.024, "TI": 0.025, "N": 0.0072 } }]
+      "positions": [
+        {
+          "heatNumber": "753932",
+          "quantity": 22,
+          "dimensions": "57.00 x 3.60 mm",
+          "material": "P235GH TC2",
+          "chemicals": {
+            "C": 0.08,
+            "MN": 0.48,
+            "SI": 0.18,
+            "NI": 0.16,
+            "CR": 0.08,
+            "MO": 0.04,
+            "CU": 0.2,
+            "Cr+Cu+Mo+Ni": 0.48,
+            "P": 0.01,
+            "S": 0.003,
+            "SN": 0.012,
+            "AL": 0.024,
+            "TI": 0.025,
+            "N": 0.0072
+          },
+          "tensileTests": [
+            {
+              "sampleNumber": "C7356/BA",
+              "testTemperatureC": 450,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 172
+                }
+              ],
+              "tensileStrengthMPa": 296,
+              "elongations": [],
+              "orientation": "longitudinal",
+              "specimenDimensions": "12.66 x 3.38 mm"
+            },
+            {
+              "sampleNumber": "C7356/BA",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 279
+                }
+              ],
+              "tensileStrengthMPa": 416,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 30.5,
+                  "gaugeLengthMm": 50
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "20.32 x 3.40 mm"
+            },
+            {
+              "sampleNumber": "C7357/BA",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 307
+                }
+              ],
+              "tensileStrengthMPa": 425,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 36,
+                  "gaugeLengthMm": 50
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "20.29 x 3.67 mm"
+            }
+          ]
+        }
+      ]
     }
   },
   {
@@ -77,7 +651,66 @@
     "expected": {
       "certificateNumber": "WZ-00063408",
       "customerOrderNumber": "PO-26-RFS001721",
-      "positions": [{ "heatNumber": "57495K", "quantity": 15, "product": "Seamless elbows EN 10253-2 Type A", "dimensions": "323.9 x 6.3 mm", "material": "P235GH TC1", "yieldStrength02": 303, "tensileStrength": 425, "elongation": 35.4, "chemicals": { "C": 0.1, "SI": 0.222, "MN": 0.56, "P": 0.017, "S": 0.007, "CR": 0.05, "MO": 0.007, "NI": 0.04, "AL": 0.026, "CU": 0.07 } }],
+      "positions": [
+        {
+          "heatNumber": "57495K",
+          "quantity": 15,
+          "product": "Seamless elbows EN 10253-2 Type A",
+          "dimensions": "323.9 x 6.3 mm",
+          "material": "P235GH TC1",
+          "chemicals": {
+            "C": 0.1,
+            "SI": 0.222,
+            "MN": 0.56,
+            "P": 0.017,
+            "S": 0.007,
+            "CR": 0.05,
+            "MO": 0.007,
+            "NI": 0.04,
+            "AL": 0.026,
+            "CU": 0.07
+          },
+          "tensileTests": [
+            {
+              "sampleNumber": "P0024372",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "ReH",
+                  "valueMPa": 303
+                }
+              ],
+              "tensileStrengthMPa": 425,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 35.4
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "11.9 x 6.9 mm"
+            },
+            {
+              "sampleNumber": "57495K/1",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "ReH",
+                  "valueMPa": 368
+                }
+              ],
+              "tensileStrengthMPa": 464,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 27.4
+                }
+              ],
+              "orientation": "longitudinal"
+            }
+          ]
+        }
+      ],
       "rawMaterialCertificate": "73958/23"
     }
   },
@@ -89,7 +722,53 @@
     "expected": {
       "certificateNumber": "100000125315",
       "customerOrderNumber": "PO-25-0006028",
-      "positions": [{ "heatNumber": "Z4195", "quantity": 53, "product": "1-inch welding neck flange, class 150, Sch-40s RF", "material": "F316/F316L", "standards": ["ASTM A182M-24", "ASME SA-182M-23"], "yieldStrength02": 256.52, "yieldStrength10": 300.52, "tensileStrength": 551.18, "elongation": 62.2, "chemicals": { "C": 0.024, "SI": 0.35, "MN": 1.52, "P": 0.04, "S": 0.009, "CR": 16.78, "NI": 10.03, "MO": 2.02, "N": 0.073 } }]
+      "positions": [
+        {
+          "heatNumber": "Z4195",
+          "quantity": 53,
+          "product": "1-inch welding neck flange, class 150, Sch-40s RF",
+          "material": "F316/F316L",
+          "standards": [
+            "ASTM A182M-24",
+            "ASME SA-182M-23"
+          ],
+          "chemicals": {
+            "C": 0.024,
+            "SI": 0.35,
+            "MN": 1.52,
+            "P": 0.04,
+            "S": 0.009,
+            "CR": 16.78,
+            "NI": 10.03,
+            "MO": 2.02,
+            "N": 0.073
+          },
+          "tensileTests": [
+            {
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 256.52
+                },
+                {
+                  "type": "Rp1.0",
+                  "valueMPa": 300.52
+                }
+              ],
+              "tensileStrengthMPa": 551.18,
+              "elongations": [
+                {
+                  "type": "4D",
+                  "valuePercent": 62.2
+                }
+              ],
+              "reductionOfAreaPercent": 73.78,
+              "orientation": "q/t"
+            }
+          ]
+        }
+      ]
     }
   },
   {
@@ -100,7 +779,104 @@
     "expected": {
       "certificateNumber": "01-26-02987",
       "customerOrderNumber": "PO-25-BBT000155",
-      "positions": [{ "heatNumber": "956643", "quantity": 1, "dimensions": "168.30 x 12.50 mm", "material": "16Mo3 TC2", "yieldStrength02": [367, 364, 369], "tensileStrength": [499, 498, 507], "elongation": [25.5, 27, 23.5], "chemicals": { "C": 0.17, "MN": 0.73, "SI": 0.25, "NI": 0.11, "CR": 0.1, "MO": 0.26, "CU": 0.14, "P": 0.008, "S": 0.003, "SN": 0.011, "AL": 0.031, "N": 0.0083 } }]
+      "positions": [
+        {
+          "heatNumber": "956643",
+          "quantity": 1,
+          "dimensions": "168.30 x 12.50 mm",
+          "material": "16Mo3 TC2",
+          "chemicals": {
+            "C": 0.17,
+            "MN": 0.73,
+            "SI": 0.25,
+            "NI": 0.11,
+            "CR": 0.1,
+            "MO": 0.26,
+            "CU": 0.14,
+            "P": 0.008,
+            "S": 0.003,
+            "SN": 0.011,
+            "AL": 0.031,
+            "N": 0.0083
+          },
+          "tensileTests": [
+            {
+              "sampleNumber": "N7438/C",
+              "testTemperatureC": 500,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 218
+                }
+              ],
+              "tensileStrengthMPa": 360,
+              "elongations": [],
+              "orientation": "longitudinal",
+              "specimenDimensions": "10.00 mm / 78.50 mm2"
+            },
+            {
+              "sampleNumber": "N7438/C",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 367
+                }
+              ],
+              "tensileStrengthMPa": 499,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 25.5,
+                  "gaugeLengthMm": 90
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "20.48 x 12.78 mm"
+            },
+            {
+              "sampleNumber": "N7439",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 364
+                }
+              ],
+              "tensileStrengthMPa": 498,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 27,
+                  "gaugeLengthMm": 90
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "20.38 x 12.56 mm"
+            },
+            {
+              "sampleNumber": "N7440/C",
+              "testTemperatureC": 20,
+              "yieldStrengths": [
+                {
+                  "type": "Rp0.2",
+                  "valueMPa": 369
+                }
+              ],
+              "tensileStrengthMPa": 507,
+              "elongations": [
+                {
+                  "type": "5D",
+                  "valuePercent": 23.5,
+                  "gaugeLengthMm": 90
+                }
+              ],
+              "orientation": "longitudinal",
+              "specimenDimensions": "20.34 x 12.22 mm"
+            }
+          ]
+        }
+      ]
     }
   }
 ]

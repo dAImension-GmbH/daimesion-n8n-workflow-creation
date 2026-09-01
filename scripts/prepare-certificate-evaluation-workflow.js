@@ -3,6 +3,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { deterministicEvaluationCode } from "./certificate-evaluator-code.js";
+import { applyStructuredTensileValidatorCode } from "./structured-tensile-validator-code.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workflowPath = path.join(ROOT, "workflows/outlook-certificate-analysis.json");
@@ -67,142 +69,6 @@ return [{
   },
   binary: { data: await this.helpers.prepareBinaryData(pdf, fileName, 'application/pdf') }
 }];`;
-const deterministicEvaluationCode = `const actual = $('Ergebnis validieren und Dokumentenreview vorbereiten').first().json;
-let evaluationRow = {};
-try { evaluationRow = $('When fetching a dataset row').first().json; } catch {}
-let prepared = {};
-try { prepared = $('Evaluations-PDF vorbereiten').first().json; } catch {}
-const expectedRaw = evaluationRow.expectedAnswer ?? prepared.expectedAnswer;
-if (!expectedRaw) throw new Error('The evaluation row has no expectedAnswer.');
-let expected = expectedRaw;
-if (typeof expectedRaw === 'string') {
-  try { expected = JSON.parse(expectedRaw); } catch { throw new Error('expectedAnswer is not valid JSON.'); }
-}
-const actualAnswer = JSON.stringify(actual);
-const expectedAnswer = typeof expectedRaw === 'string' ? expectedRaw : JSON.stringify(expectedRaw);
-const normalizeString = value => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '');
-const stringMatches = (actualValue, expectedValue) => {
-  const actualNormalized = normalizeString(actualValue);
-  const alternatives = String(expectedValue ?? '').split(/\\s+\\/\\s+/).map(normalizeString).filter(Boolean);
-  return Boolean(actualNormalized) && alternatives.some(value => actualNormalized === value || actualNormalized.includes(value) || value.includes(actualNormalized));
-};
-const productTokens = value => {
-  const aliases = { exzentrisch: 'eccentric', exzentrisches: 'eccentric', reduzierstuck: 'reducer', reduzierstueck: 'reducer', typ: 'type', rf: 'raisedface', raised: 'raisedface', face: '', zoll: 'inch', stuck: 'piece', stueck: 'piece', stick: 'piece' };
-  return String(value ?? '').normalize('NFKD').replace(/\\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\\s+/).map(token => aliases[token] ?? token).filter(Boolean);
-};
-const productMatches = (actualValue, expectedValue) => {
-  if (stringMatches(actualValue, expectedValue)) return true;
-  const actualTokens = new Set(productTokens(actualValue));
-  return String(expectedValue ?? '').split(/\\s+\\/\\s+/).some(alternative => {
-    const expectedTokens = productTokens(alternative);
-    return expectedTokens.length > 0 && expectedTokens.every(token => actualTokens.has(token));
-  });
-};
-const expectedNumber = value => Array.isArray(value) ? Math.min(...value.map(Number).filter(Number.isFinite)) : Number(value);
-const numberMatches = (actualValue, expectedValue) => {
-  const left = Number(actualValue);
-  const right = expectedNumber(expectedValue);
-  const tolerance = Math.max(0.01, Math.abs(right) * 0.0001);
-  return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= tolerance;
-};
-const chemicalNumberMatches = (actualValue, expectedValue) => {
-  const left = Number(actualValue);
-  const right = Number(expectedValue);
-  const tolerance = Math.max(0.000001, Math.abs(right) * 0.0001);
-  return Number.isFinite(left) && Number.isFinite(right) && left >= 0 && Math.abs(left - right) <= tolerance;
-};
-const dimensionsMatch = (actualValue, expectedValue) => normalizeString(actualValue) === normalizeString(expectedValue);
-const actualRows = Array.isArray(actual.results) ? actual.results : [];
-const expectedRows = Array.isArray(expected.positions) ? expected.positions : [];
-const matchedFacts = [];
-const missingOrWrongFacts = [];
-const matchedChemistryFacts = [];
-const missingOrWrongChemistryFacts = [];
-let checkedFacts = 0;
-let checkedChemistryFacts = 0;
-const record = (path, ok, detail) => {
-  checkedFacts++;
-  (ok ? matchedFacts : missingOrWrongFacts).push(ok ? path : path + ': ' + detail);
-};
-const recordChemistry = (path, ok, detail) => {
-  checkedChemistryFacts++;
-  (ok ? matchedChemistryFacts : missingOrWrongChemistryFacts).push(ok ? path : path + ': ' + detail);
-  record(path, ok, detail);
-};
-for (const [key, actualKey] of [['certificateNumber','certificateNumber'], ['customerOrderNumber','customerOrderNumber'], ['creditor','creditor']]) {
-  if (expected[key] === undefined) continue;
-  const values = actualRows.map(row => row[actualKey]);
-  record(key, values.some(value => stringMatches(value, expected[key])), 'expected ' + JSON.stringify(expected[key]) + ', got ' + JSON.stringify(values));
-}
-if (expected.rawMaterialCertificate !== undefined) {
-  const values = actualRows.map(row => row.rawMaterialCertificate);
-  record('rawMaterialCertificate', values.some(value => stringMatches(value, expected.rawMaterialCertificate)), 'expected ' + JSON.stringify(expected.rawMaterialCertificate) + ', got ' + JSON.stringify(values));
-}
-const unusedRows = new Set(actualRows.map((_, index) => index));
-for (let expectedIndex = 0; expectedIndex < expectedRows.length; expectedIndex++) {
-  const expectedRow = expectedRows[expectedIndex];
-  const candidates = [...unusedRows].filter(index => stringMatches(actualRows[index].heatNumber, expectedRow.heatNumber));
-  let rowIndex = candidates.find(index => expectedRow.dimensions === undefined || dimensionsMatch(actualRows[index].dimensions, expectedRow.dimensions));
-  if (rowIndex === undefined) rowIndex = candidates[0];
-  const prefix = 'positions[' + expectedIndex + ']';
-  if (rowIndex === undefined) {
-    record(prefix, false, 'no row for heat ' + expectedRow.heatNumber);
-    for (const [element, expectedValue] of Object.entries(expectedRow.chemicals ?? {})) {
-      recordChemistry(prefix + '.chemicals.' + element, false, 'no row for heat ' + expectedRow.heatNumber + '; expected ' + expectedValue);
-    }
-    continue;
-  }
-  unusedRows.delete(rowIndex);
-  const row = actualRows[rowIndex];
-  record(prefix + '.heatNumber', stringMatches(row.heatNumber, expectedRow.heatNumber), 'expected ' + expectedRow.heatNumber + ', got ' + row.heatNumber);
-  for (const field of ['quantity','yieldStrength02','yieldStrength10','tensileStrength','elongation']) {
-    if (expectedRow[field] === undefined) continue;
-    record(prefix + '.' + field, numberMatches(row[field], expectedRow[field]), 'expected ' + JSON.stringify(expectedRow[field]) + ', got ' + row[field]);
-  }
-  for (const field of ['product','dimensions']) {
-    if (expectedRow[field] === undefined) continue;
-    const ok = field === 'dimensions' ? dimensionsMatch(row[field], expectedRow[field]) : productMatches(row[field], expectedRow[field]);
-    record(prefix + '.' + field, ok, 'expected ' + JSON.stringify(expectedRow[field]) + ', got ' + JSON.stringify(row[field]));
-  }
-  if (expectedRow.material !== undefined) {
-    const materials = [row.werkstoff1,row.werkstoff2,row.werkstoff3,row.werkstoff4,row.werkstoff5].filter(value => value && value !== '-1').join(' / ');
-    record(prefix + '.material', stringMatches(materials, expectedRow.material), 'expected ' + JSON.stringify(expectedRow.material) + ', got ' + JSON.stringify(materials));
-  }
-  if (expectedRow.standards !== undefined) {
-    const norms = [row.norm1,row.norm2,row.norm3,row.norm4,row.norm5].filter(value => value && value !== '-1').join(' / ');
-    const standards = Array.isArray(expectedRow.standards) ? expectedRow.standards : [expectedRow.standards];
-    for (let standardIndex = 0; standardIndex < standards.length; standardIndex++) {
-      record(prefix + '.standards[' + standardIndex + ']', stringMatches(norms, standards[standardIndex]), 'expected ' + JSON.stringify(standards[standardIndex]) + ', got ' + JSON.stringify(norms));
-    }
-  }
-  const actualChemicals = row.chemicals && typeof row.chemicals === 'object' && !Array.isArray(row.chemicals) ? row.chemicals : {};
-  const actualChemicalEntries = Object.entries(actualChemicals);
-  for (const [element, expectedValue] of Object.entries(expectedRow.chemicals ?? {})) {
-    const actualEntry = actualChemicalEntries.find(([actualElement]) => String(actualElement).toUpperCase() === String(element).toUpperCase());
-    const actualValue = actualEntry?.[1];
-    recordChemistry(
-      prefix + '.chemicals.' + element,
-      chemicalNumberMatches(actualValue, expectedValue),
-      'expected ' + expectedValue + ', got ' + JSON.stringify(actualValue)
-    );
-  }
-}
-if (checkedChemistryFacts === 0) {
-  recordChemistry('chemistryGroundTruth', false, 'no expected chemical measurements configured');
-}
-record('rowCount', actualRows.length === expectedRows.length, 'expected ' + expectedRows.length + ', got ' + actualRows.length);
-const correctness = checkedFacts ? matchedFacts.length / checkedFacts : 0;
-const chemistryScore = checkedChemistryFacts ? matchedChemistryFacts.length / checkedChemistryFacts : 0;
-const chemistryPassed = checkedChemistryFacts > 0 && missingOrWrongChemistryFacts.length === 0 ? 1 : 0;
-const baseScore = missingOrWrongFacts.length === 0 ? 5 : correctness >= 0.95 ? 4 : correctness >= 0.8 ? 3 : correctness >= 0.5 ? 2 : 1;
-const score = chemistryPassed ? baseScore : Math.min(baseScore, 3);
-const passed = missingOrWrongFacts.length === 0 && chemistryPassed === 1 ? 1 : 0;
-const reasoning = passed ? 'All ' + checkedFacts + ' expected facts matched deterministically.' : missingOrWrongFacts.join('; ');
-const chemistryReasoning = chemistryPassed
-  ? 'All ' + checkedChemistryFacts + ' expected chemical measurements matched their heat.'
-  : missingOrWrongChemistryFacts.join('; ');
-return [{ json: { actualAnswer, expectedAnswer, score, correctness, passed, reasoning, matchedFacts, missingOrWrongFacts, chemistryScore, chemistryPassed, chemistryReasoning, matchedChemistryFacts, missingOrWrongChemistryFacts } }];`;
-
 if (!workflow.nodes.some((node) => node.name === manualName)) {
   workflow.nodes.push({
     parameters: {},
@@ -307,6 +173,9 @@ const setOutputsDefinition = {
       { outputName: "chemistryScore", outputValue: "={{ $json.chemistryScore }}" },
       { outputName: "chemistryReasoning", outputValue: "={{ $json.chemistryReasoning }}" },
       { outputName: "chemistryPassed", outputValue: "={{ $json.chemistryPassed }}" },
+      { outputName: "tensileScore", outputValue: "={{ $json.tensileScore }}" },
+      { outputName: "tensileReasoning", outputValue: "={{ $json.tensileReasoning }}" },
+      { outputName: "tensilePassed", outputValue: "={{ $json.tensilePassed }}" },
       { outputName: "passed", outputValue: "={{ $json.passed }}" }
     ] }
   },
@@ -327,6 +196,8 @@ const setMetricsDefinition = {
       { id: "2e1b70c2-45c4-4f06-8985-3ef7b1ff3df4", name: "correctness", value: "={{ $json.correctness }}", type: "number" },
       { id: "cb591335-2bbc-4ac4-9d55-d6d27ed2ff6c", name: "Chemistry score", value: "={{ $json.chemistryScore }}", type: "number" },
       { id: "ffae4488-3f4a-4074-b2f8-da805ae09582", name: "Chemistry pass rate", value: "={{ $json.chemistryPassed }}", type: "number" },
+      { id: "76f0d41b-8cb1-42d8-8d71-b07177cbe101", name: "Tensile-test score", value: "={{ $json.tensileScore }}", type: "number" },
+      { id: "ad5ad829-d247-4668-995d-08f2b9f3f7fb", name: "Tensile-test pass rate", value: "={{ $json.tensilePassed }}", type: "number" },
       { id: "ef05dbf9-b4ec-4d11-9215-cb19e12bafc4", name: "Pass rate", value: "={{ $json.passed }}", type: "number" }
     ] }
   },
@@ -1121,11 +992,7 @@ const correctCertificateRow = (sourceRow) => {
   const correctionStart = finalValidation.parameters.jsCode.indexOf("const evidenceValue =");
   const correctionEndMarker = "  return row;\n};";
   const correctionEnd = correctionStart >= 0 ? finalValidation.parameters.jsCode.indexOf(correctionEndMarker, correctionStart) : -1;
-  if (correctionStart >= 0 && correctionEnd >= 0) {
-    finalValidation.parameters.jsCode = finalValidation.parameters.jsCode.slice(0, correctionStart)
-      + deterministicCorrectionCode
-      + finalValidation.parameters.jsCode.slice(correctionEnd + correctionEndMarker.length);
-  } else if (!finalValidation.parameters.jsCode.includes("const correctCertificateRow =")) {
+  if ((correctionStart < 0 || correctionEnd < 0) && !finalValidation.parameters.jsCode.includes("const correctCertificateRow =")) {
     finalValidation.parameters.jsCode = finalValidation.parameters.jsCode.replace(
       "const normalized = rows.map((row) => {",
       deterministicCorrectionCode + "\nconst normalized = rows.map((sourceRow) => {\n  const row = correctCertificateRow(sourceRow);"
@@ -1139,7 +1006,57 @@ const correctCertificateRow = (sourceRow) => {
     .replace(
       "certificateNumber: toString(row.certificateNumber), quantity, creditor:",
       "certificateNumber: toString(row.certificateNumber), rawMaterialCertificate: toString(row.rawMaterialCertificate), quantity, creditor:"
+    )
+    .replace("  const po = toString(row.customerOrderNumber);", "  let po = toString(row.customerOrderNumber);")
+    .replace(
+      "  if (expectedPo !== '-1' && po.toUpperCase() !== expectedPo.toUpperCase()) humanRequired = true;",
+      "  if (expectedPo !== '-1' && po.toUpperCase() !== expectedPo.toUpperCase()) {\n    const poKey = value => String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^PO/, '');\n    const actualKey = poKey(po);\n    const expectedKey = poKey(expectedPo);\n    if (actualKey.length >= 6 && expectedKey.endsWith(actualKey)) po = expectedPo;\n    else humanRequired = true;\n  }"
     );
+  finalValidation.parameters.jsCode = applyStructuredTensileValidatorCode(finalValidation.parameters.jsCode);
+  if (!finalValidation.parameters.jsCode.includes("const deduplicatedRows = [];")) {
+    const deduplicateRowsCode = String.raw`const rowIdentityFields = ['certificateNumber','customerOrderNumber','dimensions','product'];
+const rowIdentityValue = value => {
+  const text = String(value ?? '').trim();
+  return !text || text === '-1' ? '' : text.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+};
+const rowMechanicalSignature = row => JSON.stringify({
+  heatNumber: rowIdentityValue(row.heatNumber),
+  chemicals: row.chemicals,
+  tensileTests: row.tensileTests,
+  yieldStrength02: row.yieldStrength02,
+  yieldStrength10: row.yieldStrength10,
+  tensileStrength: row.tensileStrength,
+  elongation: row.elongation,
+});
+const rowsHaveConflictingIdentity = (left, right) => {
+  for (const field of rowIdentityFields) {
+    const leftValue = rowIdentityValue(left[field]);
+    const rightValue = rowIdentityValue(right[field]);
+    if (leftValue && rightValue && leftValue !== rightValue) return true;
+  }
+  return left.quantity > 0 && right.quantity > 0 && left.quantity !== right.quantity;
+};
+const rowCompleteness = row => {
+  let score = row.quantity > 0 ? 2 : 0;
+  for (const field of [...rowIdentityFields, 'creditor', 'rawMaterialCertificate', 'werkstoff1', 'norm1']) {
+    if (rowIdentityValue(row[field])) score++;
+  }
+  return score;
+};
+const deduplicatedRows = [];
+for (const row of normalized) {
+  const signature = rowMechanicalSignature(row);
+  const duplicateIndex = deduplicatedRows.findIndex(existing => rowMechanicalSignature(existing) === signature && !rowsHaveConflictingIdentity(existing, row));
+  if (duplicateIndex < 0) {
+    deduplicatedRows.push(row);
+    continue;
+  }
+  if (rowCompleteness(row) > rowCompleteness(deduplicatedRows[duplicateIndex])) deduplicatedRows[duplicateIndex] = row;
+}`;
+    finalValidation.parameters.jsCode = finalValidation.parameters.jsCode
+      .replace("const result = { correlationKey:", deduplicateRowsCode + "\nconst result = { correlationKey:")
+      .replace("results: normalized };\nreturn [{ json: { ...result", "results: deduplicatedRows };\nreturn [{ json: { ...result");
+  }
 }
 
 const normalizationPreparation = workflow.nodes.find((node) => node.name === "Belege sammeln und Normalisierung bauen");
@@ -1265,6 +1182,10 @@ return [{ json: { replyMailId: original.mailId, replyText: 'Die Zertifikatsextra
 }
 
 for (const [name, tries, delay] of [
+  ["Mail mit GLM 5.3 Flash einordnen", 3, 20000],
+  ["Belege mit GLM 5.3 Flash extrahieren", 5, 20000],
+  ["Mit GLM 5.3 Flash normalisieren", 5, 20000],
+  ["Mit GLM 5.3 Flash prüfen", 5, 20000],
   ["MinerU-Status prüfen", 3, 5000],
   ["PDF mit MinerU lesen", 3, 5000],
   ["Dokumentenreview anlegen", 3, 5000],

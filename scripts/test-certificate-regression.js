@@ -103,6 +103,13 @@ if (/Report Number:\s*2026\s*-\s*102898/i.test(text)) {
     yieldStrength10: 278,
     tensileStrength: 529,
     elongation: 42.9,
+    tensileTests: [{
+      sampleNumber: "41720",
+      testTemperatureC: 23,
+      yieldStrengths: [{ type: "Rp0.2", valueMPa: 233 }, { type: "Rp1.0", valueMPa: 278 }],
+      tensileStrengthMPa: 529,
+      elongations: [{ type: "A5", valuePercent: 42.9 }, { type: "2IN", valuePercent: 47.9 }],
+    }],
     certificateNumber: "2026-102898",
     quantity: 2,
     creditor: "Unicorn GmbH Tailormade Processing",
@@ -129,6 +136,11 @@ if (/Report Number:\s*2026\s*-\s*102898/i.test(text)) {
     yieldStrength10: 293,
     tensileStrength: 564,
     elongation: 50.1,
+    tensileTests: [{
+      yieldStrengths: [{ type: "Rp0.2", valueMPa: 259 }, { type: "Rp1.0", valueMPa: 293 }],
+      tensileStrengthMPa: 573,
+      elongations: [{ type: "5D", valuePercent: 50.1 }],
+    }],
     dimensions: "133,0 x 14,2 mm",
   };
   const validationContext = { ...collectedJson, orderData: { poNumber: "PO-25-RFS003046" }, replyMailId: "unicorn-regression-mail" };
@@ -164,6 +176,38 @@ if (/Report Number:\s*2026\s*-\s*102898/i.test(text)) {
   if (repeated[0]?.json?.results?.length !== 2) failures.push("same-heat positions: a repeated heat number was deduplicated");
   if (repeated[0]?.json?.results?.some((row) => row.humanRequired)) failures.push("same-heat positions: repeated heat number was incorrectly marked as requiring review");
 
+  const sparseDuplicate = {
+    ...baseRow,
+    certificateNumber: "-1",
+    quantity: 0,
+    creditor: "-1",
+    product: "-1",
+    customerOrderNumber: "-1",
+    dimensions: "-1",
+    werkstoff1: "-1",
+    norm1: "-1",
+  };
+  const sparseDuplicateResult = await runCodeNode(
+    "Ergebnis validieren und Dokumentenreview vorbereiten",
+    [{ json: { choices: [{ message: { content: JSON.stringify({ results: [sparseDuplicate, baseRow] }) } }] } }],
+    { "Qualitätsprüfung vorbereiten": [{ json: validationContext }] },
+  );
+  const sparseDuplicateRows = sparseDuplicateResult[0]?.json?.results ?? [];
+  if (sparseDuplicateRows.length !== 1) failures.push(`sparse duplicate: expected 1 enriched row, got ${sparseDuplicateRows.length}`);
+  if (sparseDuplicateRows[0]?.certificateNumber !== baseRow.certificateNumber || sparseDuplicateRows[0]?.dimensions !== "193.7 x 22.2 mm") {
+    failures.push("sparse duplicate: the complete deck-certificate row was not retained");
+  }
+
+  const truncatedPoResult = await runCodeNode(
+    "Ergebnis validieren und Dokumentenreview vorbereiten",
+    [{ json: { choices: [{ message: { content: JSON.stringify({ results: [{ ...baseRow, customerOrderNumber: "PO-RFS003046" }] }) } }] } }],
+    { "Qualitätsprüfung vorbereiten": [{ json: validationContext }] },
+  );
+  const truncatedPoRow = truncatedPoResult[0]?.json?.results?.[0];
+  if (truncatedPoRow?.customerOrderNumber !== "PO-25-RFS003046" || truncatedPoRow?.humanRequired) {
+    failures.push(`truncated PO: expected deterministic completion from order context, got ${truncatedPoRow?.customerOrderNumber}`);
+  }
+
   const chunkPrompt = nodeCode["Zeugnis in Belegblöcke teilen"];
   const normalizePrompt = nodeCode["Belege sammeln und Normalisierung bauen"];
   const qualityPrompt = nodeCode["Qualitätsprüfung vorbereiten"];
@@ -171,9 +215,9 @@ if (/Report Number:\s*2026\s*-\s*102898/i.test(text)) {
   requireMatch("extraction position identity", chunkPrompt, /Item-\/Positionsnummer[\s\S]*positionNumber/);
   requireMatch("normalization repeated-heat position rule", normalizePrompt, /Dieselbe Schmelznummer[\s\S]*jede Position/);
   requireMatch("quality repeated-heat position rule", qualityPrompt, /Gleiche Schmelznummern[\s\S]*getrennte Zeilen/);
-requireMatch("room-temperature range", normalizePrompt, /20 bis 23 °C/);
+requireMatch("structured tensile tests", normalizePrompt, /tensileTests[\s\S]*Jeder Prüfkörper/);
 requireMatch("approval-certificate exclusion", normalizePrompt, /Zulassungsnummern dürfen es nicht ersetzen/);
-requireMatch("exact mechanical minimum", normalizePrompt, /Mechanische Istwerte niemals runden/);
+requireMatch("paired mechanical values", normalizePrompt, /niemals minimieren oder neu kombinieren/);
   requireMatch("piece quantity support", chunkPrompt, /Stück\/Qty\/PCS/);
 
   if (failures.length) {
@@ -190,10 +234,7 @@ requireMatch("exact mechanical minimum", normalizePrompt, /Mechanische Istwerte 
       heatNumber: row.heatNumber,
       quantity: row.quantity,
       dimensions: row.dimensions,
-      yieldStrength02: row.yieldStrength02,
-      yieldStrength10: row.yieldStrength10,
-      tensileStrength: row.tensileStrength,
-      elongation: row.elongation,
+      tensileTests: row.tensileTests,
       chemicals: row.chemicals,
     })),
   };
@@ -336,6 +377,12 @@ const candidateRow = {
   yieldStrength10: -1,
   tensileStrength: 521,
   elongation: 27.5,
+  tensileTests: [{
+    testTemperatureC: 20,
+    yieldStrengths: [{ type: "Rp0.2", valueMPa: 334 }],
+    tensileStrengthMPa: 521,
+    elongations: [{ type: "5D", valuePercent: 27.5 }],
+  }],
   certificateNumber: "02-26-15374",
   quantity: 207.67,
   creditor: "Silcotub S.A. Plant",
@@ -381,7 +428,7 @@ for (const [label, code] of [["extraction prompt", chunkPrompt], ["normalization
   requireMatch(`${label} X100 example`, code, /18\/X100\s*=\s*0\.18|raw 18 unter X 100 ergibt 0\.18/i);
   requireMatch(`${label} X1000 example`, code, /13\/X1000\s*=\s*0\.013|raw 13 unter X 1000 ergibt 0\.013/i);
   requireMatch(`${label} X10000 example`, code, /92\/X10000\s*=\s*0\.0092|raw 92 unter X 10000 ergibt 0\.0092/i);
-  requireMatch(`${label} per-heat metres`, code, /schmelzenspezifische[nr]?\s+(?:MT-Spalte|Länge)|MT(?:-Spalte)?\s+je\s+Schmelze/i);
+  requireMatch(`${label} per-heat quantity`, code, /(?:positions-\/schmelzenspezifische Liefermenge|Mengenzeile[\s\S]{0,80}(?:Heat|Schmelze|Charge)|Gesamtmenge niemals auf jede Schmelze)/i);
 }
 requireMatch("critical source passed to normalization", normalizePrompt, /<ORIGINALAUSSCHNITTE>/);
 requireMatch("critical source passed to quality check", qualityPrompt, /<ORIGINALAUSSCHNITTE>/);

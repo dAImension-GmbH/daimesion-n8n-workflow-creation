@@ -75,6 +75,10 @@ function assertEqual(label, actual, expected) {
   if (actual !== expected) throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
 
+function assertDeepEqual(label, actual, expected) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+}
+
 const bk = await validate({
   ...baseRow,
   heatNumber: "245086",
@@ -141,6 +145,14 @@ for (const [field, expected] of Object.entries({
   tensileStrength: 547,
   elongation: 52.5,
 })) assertEqual(`B+K ${field}`, bk[field], expected);
+assertDeepEqual("B+K paired tensile tests", bk.tensileTests.map((test) => ({
+  yieldStrengths: test.yieldStrengths,
+  tensileStrengthMPa: test.tensileStrengthMPa,
+  elongations: test.elongations,
+})), [
+  { yieldStrengths: [{ type: "Rp0.2", valueMPa: 284 }, { type: "Rp1.0", valueMPa: 317 }], tensileStrengthMPa: 547, elongations: [{ type: "A5", valuePercent: 52.5 }] },
+  { yieldStrengths: [{ type: "Rp0.2", valueMPa: 271 }, { type: "Rp1.0", valueMPa: 306 }], tensileStrengthMPa: 547, elongations: [{ type: "A5", valuePercent: 52.5 }] },
+]);
 
 const silcotub = await validate({
   ...baseRow,
@@ -162,6 +174,8 @@ const silcotub = await validate({
 assertEqual("Silcotub yieldStrength02", silcotub.yieldStrength02, 509);
 assertEqual("Silcotub tensileStrength", silcotub.tensileStrength, 679);
 assertEqual("Silcotub elongation", silcotub.elongation, 26);
+assertDeepEqual("Silcotub per-specimen Rm", silcotub.tensileTests.map((test) => test.tensileStrengthMPa), [679, 683, 679, 679]);
+assertDeepEqual("Silcotub per-specimen elongation", silcotub.tensileTests.map((test) => test.elongations[0]?.valuePercent), [37.5, 40, 26, 28]);
 
 const silcotubNestedEvidence = await validate({
   ...baseRow,
@@ -195,6 +209,7 @@ const silcotubNestedEvidence = await validate({
 assertEqual("nested Silcotub yieldStrength02", silcotubNestedEvidence.yieldStrength02, 509);
 assertEqual("nested Silcotub tensileStrength", silcotubNestedEvidence.tensileStrength, 679);
 assertEqual("nested Silcotub elongation", silcotubNestedEvidence.elongation, 26);
+assertEqual("nested Silcotub selected test count", silcotubNestedEvidence.tensileTests.length, 2);
 
 const silcotubChemistryTable = [
   "CHEMICAL COMPOSITION / CHEMISCHE ZUSAMMENSETZUNG",
@@ -291,6 +306,53 @@ const dalmine = await validate({
 assertEqual("Dalmine yieldStrength02", dalmine.yieldStrength02, 364);
 assertEqual("Dalmine tensileStrength", dalmine.tensileStrength, 498);
 assertEqual("Dalmine elongation", dalmine.elongation, 23.5);
+assertDeepEqual("Dalmine paired tensile tests", dalmine.tensileTests.map((test) => [
+  test.yieldStrengths[0]?.valueMPa,
+  test.tensileStrengthMPa,
+  test.elongations[0]?.valuePercent,
+]), [[367, 499, 25.5], [364, 498, 27], [369, 507, 23.5]]);
+
+const duplicatedTensileEvidence = await validate({ ...baseRow, heatNumber: "DEDUP", yieldStrength02: 367, tensileStrength: 499, elongation: 25.5 }, {
+  evidence: {
+    chunks: [
+      { sourceBlock: { index: 1 }, heats: [{ heatNumber: { value: "DEDUP" }, tensileTests: [{
+        sampleNumber: "N7438/C", testTemperatureC: 20,
+        yieldStrengths: [{ type: "Rp0.2", valueMPa: 367 }], tensileStrengthMPa: 499,
+        elongations: [{ type: "5D (Lo 5D = 5.65√So)", valuePercent: 25.5, gaugeLengthMm: 90 }],
+        specimenDimensions: "20.48 x 12.78 mm",
+      }] }] },
+      { sourceBlock: { index: 2 }, heats: [{ heatNumber: { value: "DEDUP" }, tensileTests: [{
+        sampleNumber: "N7438/C", testTemperatureC: 20,
+        yieldStrengths: [{ type: "Rp0.2", valueMPa: 367 }], tensileStrengthMPa: 499,
+        elongations: [{ type: "A", valuePercent: 25.5, gaugeLengthMm: 90 }],
+        specimenDimensions: "Ss 20.48 x 12.78 mm, 262.50 mm²",
+      }] }] },
+    ],
+  },
+});
+assertEqual("overlapping tensile evidence is deduplicated", duplicatedTensileEvidence.tensileTests.length, 1);
+
+const requirementElongationNoise = await validate({ ...baseRow, heatNumber: "REQNOISE", yieldStrength02: 512, tensileStrength: 679, elongation: 37.5 }, {
+  evidence: {
+    chunks: [
+      { sourceBlock: { index: 1 }, heats: [{ heatNumber: { value: "REQNOISE" }, tensileTests: [{
+        sampleNumber: "Q5115/AA", testTemperatureC: 20,
+        yieldStrengths: [{ type: "Rp0.2", valueMPa: 512 }], tensileStrengthMPa: 679,
+        elongations: [{ type: "2IN", valuePercent: 37.5, gaugeLengthMm: 50 }],
+      }] }] },
+      { sourceBlock: { index: 2 }, heats: [{ heatNumber: { value: "REQNOISE" }, tensileTests: [{
+        sampleNumber: "Q5115/AA", testTemperatureC: 20,
+        yieldStrengths: [{ type: "Rp0.2", valueMPa: 512 }], tensileStrengthMPa: 679,
+        elongations: [
+          { type: "A (Obt., Lo=2\")", valuePercent: 30.6, gaugeLengthMm: 50 },
+          { type: "unlabeled (2. Dehnungsspalte)", valuePercent: 37.5 },
+        ],
+      }] }] },
+    ],
+  },
+});
+assertEqual("requirement elongation does not create a duplicate specimen", requirementElongationNoise.tensileTests.length, 1);
+assertDeepEqual("requirement elongation is excluded in favor of the clean measured value", requirementElongationNoise.tensileTests[0].elongations.map(entry => entry.valuePercent), [37.5]);
 
 const dalminePieceQuantity = await validate({
   ...baseRow,
@@ -360,7 +422,14 @@ assertEqual("Unicorn position-specific dimensions", unicornPositionDimensions.di
 assertEqual("Unicorn position-specific product", unicornPositionDimensions.product, "Hülse 193,7 x 22,2 mm");
 assertEqual("Unicorn position-specific quantity", unicornPositionDimensions.quantity, 2);
 
-const invalidOffset = await validate({ ...baseRow, yieldStrength02: 300, yieldStrength10: 250 });
+const invalidOffset = await validate({
+  ...baseRow,
+  tensileTests: [{
+    yieldStrengths: [{ type: "Rp0.2", valueMPa: 300 }, { type: "Rp1.0", valueMPa: 250 }],
+    tensileStrengthMPa: 400,
+    elongations: [],
+  }],
+});
 assertEqual("invalid Rp1.0 reset", invalidOffset.yieldStrength10, -1);
 assertEqual("invalid Rp1.0 review", invalidOffset.humanRequired, true);
 
@@ -373,7 +442,20 @@ const missingMechanicalCell = await validate({
     tests: [{ comparableGroupId: "STAROFIT", gaugeLengthType: "A5", yieldStrength02: null, tensileStrength: 447, elongation: 35 }],
   },
 });
-assertEqual("empty mechanical cell does not become zero", missingMechanicalCell.yieldStrength02, 306);
+assertEqual("empty mechanical cell does not become zero", missingMechanicalCell.yieldStrength02, -1);
+assertEqual("empty mechanical cell remains absent", missingMechanicalCell.tensileTests[0].yieldStrengths.length, 0);
+
+const genericYieldPoint = await validate({
+  ...baseRow,
+  tensileTests: [{ yieldStrengths: [{ type: "Yield Point", valueMPa: 303 }], tensileStrengthMPa: 425, elongations: [{ type: "5D", valuePercent: 35.4 }] }],
+}, { criticalSource: "Streckgrenze / Yield strength / Yield Point MPa 303" });
+assertEqual("generic yield-point header normalizes to ReH", genericYieldPoint.tensileTests[0].yieldStrengths[0].type, "ReH");
+
+const explicitOffsetYield = await validate({
+  ...baseRow,
+  tensileTests: [{ yieldStrengths: [{ type: "Yield Point", valueMPa: 303 }], tensileStrengthMPa: 425, elongations: [] }],
+}, { criticalSource: "Yield Strength \\(R_{p0,2}\\) MPa 303" });
+assertEqual("explicit 0.2 percent offset remains Rp0.2", explicitOffsetYield.tensileTests[0].yieldStrengths[0].type, "Rp0.2");
 
 const evidencePreferred = await validate({
   ...baseRow,
@@ -413,10 +495,11 @@ const acceptanceRowPreferred = await validate({ ...baseRow, heatNumber: "901972"
     }],
   },
 });
-assertEqual("acceptance row yieldStrength02", acceptanceRowPreferred.yieldStrength02, 259);
-assertEqual("acceptance row yieldStrength10", acceptanceRowPreferred.yieldStrength10, 293);
-assertEqual("acceptance row tensileStrength", acceptanceRowPreferred.tensileStrength, 573);
+assertEqual("acceptance row yieldStrength02", acceptanceRowPreferred.yieldStrength02, 255);
+assertEqual("acceptance row yieldStrength10", acceptanceRowPreferred.yieldStrength10, 290);
+assertEqual("acceptance row tensileStrength", acceptanceRowPreferred.tensileStrength, 569);
 assertEqual("acceptance row elongation", acceptanceRowPreferred.elongation, 50.1);
+assertEqual("acceptance row preserves both specimens", acceptanceRowPreferred.tensileTests.length, 2);
 
 const sourceBlockScoped = await validate({ ...baseRow, heatNumber: "333691", yieldStrength02: 301, tensileStrength: 435, elongation: 37.5 }, {
   evidence: {
@@ -426,9 +509,10 @@ const sourceBlockScoped = await validate({ ...baseRow, heatNumber: "333691", yie
     ],
   },
 });
-assertEqual("source-block scoped yieldStrength02", sourceBlockScoped.yieldStrength02, 306);
-assertEqual("source-block scoped tensileStrength", sourceBlockScoped.tensileStrength, 447);
+assertEqual("source-block scoped yieldStrength02", sourceBlockScoped.yieldStrength02, 301);
+assertEqual("source-block scoped tensileStrength", sourceBlockScoped.tensileStrength, 435);
 assertEqual("source-block scoped elongation", sourceBlockScoped.elongation, 35);
+assertEqual("source-block scoped preserves both tests", sourceBlockScoped.tensileTests.length, 2);
 
 const venusQuote = "608.63613.85 | 279.26327.21 | 301.87358.29 | 63.0 / 57.5364.0 / 58.44";
 const venus = await validate({ ...baseRow, heatNumber: "N3164", yieldStrength02: 279.26, yieldStrength10: -1, tensileStrength: 608.63, elongation: 57.5 }, {
@@ -454,11 +538,12 @@ assertEqual("Venus preferred elongation", venus.elongation, 63);
 const venusLiveShape = await validate({ ...baseRow, heatNumber: "N3164", yieldStrength02: 279.26, yieldStrength10: 301.87, tensileStrength: 608.63, elongation: 57.5 }, {
   criticalSource: "<table><tr><td>Mechanical tests @ Room temperature</td><td>% Elongation</td></tr><tr><td>608.63613.85</td><td>63.0 / 57.5364.0 / 58.44</td></tr></table>",
   evidence: { chunks: [{ heats: [{ heatNumber: { value: "N3164" }, tensileTests: [
-    { comparableGroupId: "N3164-1", testBlockId: "N3164-1", gaugeLengthType: "A5", temperatureC: 20, yieldStrength02: 279.26, yieldStrength10: 301.87, yieldStrength10Explicit: true, tensileStrength: 608.63, elongation: 63, isPrimaryAcceptanceBlock: true, sourceQuote: "608.63 / 279.26 / 301.87 / 63.0" },
-    { comparableGroupId: "N3164-1", testBlockId: "N3164-1", gaugeLengthType: "A5", temperatureC: 20, yieldStrength02: 327.21, yieldStrength10: 358.29, yieldStrength10Explicit: true, tensileStrength: 613.85, elongation: 57.5, isPrimaryAcceptanceBlock: true, sourceQuote: "613.85 / 327.21 / 358.29 / 57.5" },
+    { comparableGroupId: "N3164-1", testBlockId: "N3164-1", testTemperatureC: 20, yieldStrengths: [{ type: "Rp0.2", valueMPa: 279.26 }, { type: "Rp1.0", valueMPa: 301.87 }], tensileStrengthMPa: 608.63, elongations: [{ type: "50MM", valuePercent: 63 }, { type: "5D", valuePercent: 57.53 }], isPrimaryAcceptanceBlock: true, sourceQuote: "608.63 / 279.26 / 301.87 / 63.0 / 57.53" },
+    { comparableGroupId: "N3164-1", testBlockId: "N3164-1", testTemperatureC: 20, yieldStrengths: [{ type: "Rp0.2", valueMPa: 327.21 }, { type: "Rp1.0", valueMPa: 358.29 }], tensileStrengthMPa: 613.85, elongations: [{ type: "50MM", valuePercent: 64 }, { type: "5D", valuePercent: 58.44 }], isPrimaryAcceptanceBlock: true, sourceQuote: "613.85 / 327.21 / 358.29 / 64.0 / 58.44" },
   ] }] }] },
 });
 assertEqual("Venus live-shape preferred elongation", venusLiveShape.elongation, 63);
+assertDeepEqual("Venus live-shape paired elongations", venusLiveShape.tensileTests.map((test) => test.elongations.map((entry) => entry.valuePercent)), [[63, 57.53], [64, 58.44]]);
 
 const lindemann = await validate({
   ...baseRow,

@@ -117,15 +117,15 @@ assert(worker.connections["Belege mit GLM 5.3 Flash extrahieren"]?.main?.[0]?.so
 assert(worker.connections["GLM 5.3 Flash zwischen Blöcken entlasten"]?.main?.[0]?.some((entry) => entry.node === evidenceLoop.name), "Evidence block path must return to the loop");
 assert(worker.connections["GLM 5.3 Flash zwischen Blöcken entlasten"]?.main?.[0]?.some((entry) => entry.node === "Bearbeitungslease erneuern"), "Long evidence extraction must renew the processing lease");
 
-for (const glmNodeName of [
-  "Mail mit GLM 5.3 Flash einordnen",
-  "Belege mit GLM 5.3 Flash extrahieren",
-  "Mit GLM 5.3 Flash normalisieren",
-  "Mit GLM 5.3 Flash prüfen",
+for (const [glmNodeName, expectedMaxTries] of [
+  ["Mail mit GLM 5.3 Flash einordnen", 3],
+  ["Belege mit GLM 5.3 Flash extrahieren", 5],
+  ["Mit GLM 5.3 Flash normalisieren", 5],
+  ["Mit GLM 5.3 Flash prüfen", 5],
 ]) {
   const glmNode = worker.nodes.find((node) => node.name === glmNodeName);
   assert(glmNode?.retryOnFail === true, `${glmNodeName} must retry transient failures`);
-  assert(glmNode?.maxTries === 3, `${glmNodeName} must try at most three times`);
+  assert(glmNode?.maxTries === expectedMaxTries, `${glmNodeName} must use the configured bounded retry count`);
   assert(glmNode?.waitBetweenTries >= 20_000, `${glmNodeName} must delay retries`);
 }
 
@@ -142,7 +142,7 @@ const reviewPrepare = worker.nodes.find((node) => node.name === "Dokumentenrevie
 assert(reviewPrepare?.parameters?.jsCode, "Document review upload preparation is missing");
 const chemicalKeys = ["C", "SI", "S", "P", "SN", "MN", "CR", "NI", "MO", "TI", "CO", "CU", "N", "AL", "V", "NB", "B", "Zr", "W", "Sb", "As", "AL/N", "Nb+(V2,5)", "Nb+V+Ti", "Mn/C", "CEV", "V+NB", "Ni+Cu", "Cu+Ni+Cr+Mo+V", "Cr+Cu+Mo+Ni", "Cu+Mo"];
 const reviewAnalysisKeys = [
-  "heatNumber", "chemicals", "yieldStrength02", "yieldStrength10", "tensileStrength", "elongation",
+  "heatNumber", "chemicals", "tensileTests",
   "certificateNumber", "quantity", "creditor", "product", "humanRequired", "customerOrderNumber",
   "orderLine", "dimensions", "werkstoff1", "werkstoff2", "werkstoff3", "werkstoff4", "werkstoff5",
   "norm1", "norm2", "norm3", "norm4", "norm5",
@@ -158,6 +158,13 @@ async function prepareReview(mailId, orderLine) {
     yieldStrength10: -1,
     tensileStrength: 521,
     elongation: 27.5,
+    tensileTests: [{
+      sampleNumber: "C7356/BA",
+      testTemperatureC: 20,
+      yieldStrengths: [{ type: "Rp0.2", valueMPa: 334 }],
+      tensileStrengthMPa: 521,
+      elongations: [{ type: "5D", valuePercent: 27.5 }],
+    }],
     certificateNumber: "02-26-15374",
     rawMaterialCertificate: "RAW-123",
     quantity: 207.67,
@@ -214,6 +221,9 @@ assert(firstRequest.analysis[0].quantity === "207.67", "Document review quantity
 assert(firstRequest.analysis[0].orderLine === "-1", "Missing document review orderLine must use the -1 sentinel");
 assert(secondRequest.analysis[0].orderLine === "00020", "Document review must preserve an available orderLine");
 assert(firstRequest.analysis[0].humanRequired === true, "Document review rows must require human confirmation");
+assert(firstRequest.analysis[0].tensileTests[0].sampleNumber === "C7356/BA", "Document review must preserve per-specimen tensile-test metadata");
+assert(firstRequest.analysis[0].tensileTests[0].yieldStrengths[0].type === "Rp0.2", "Document review must preserve typed yield strengths");
+assert(!Object.hasOwn(firstRequest.analysis[0], "yieldStrength02"), "Legacy scalar tensile fields must not be sent to Document Review");
 assert(!Object.hasOwn(firstRequest.analysis[0], "rawMaterialCertificate"), "Unsupported rawMaterialCertificate must not be sent to Document Review");
 assert(JSON.stringify(Object.keys(firstRequest.analysis[0]).sort()) === JSON.stringify(reviewAnalysisKeys), "Document review analysis must contain exactly the API contract fields");
 assert(firstReview.json.results[0].quantity === 207.67, "Internal results must preserve numeric quantity");
