@@ -161,7 +161,9 @@ The worker contains a configured n8n Evaluation Trigger named
 `Evaluations-PDF vorbereiten`. The PDF then joins the production path directly
 before `PDF-Upload vorbereiten`, so evaluations use the same
 `pdf.daimension.ai` MinerU/OCR endpoint and the same dAImension LLM extraction
-as real email certificates.
+as real email certificates. `Evaluations-PDF vorbereiten` strips
+`expectedAnswer` before that join; only the evaluator reads the expected answer
+directly from the Evaluation Trigger or the manual dataset loader.
 
 After extraction, `Evaluation deterministisch bewerten` compares only the facts
 in `expectedAnswer` with the actual structured result. Numeric values use a
@@ -199,6 +201,19 @@ workflow, and then prepare the evaluation nodes:
 npm run setup:evaluations
 npm run prepare:evaluations
 ```
+
+Production prompt maintenance is intentionally separate:
+
+```sh
+npm run prepare:certificate
+```
+
+`prepare:evaluations` only manages the evaluation harness and never modifies
+production prompts, extraction schemas, validators, PDF normalization, or
+delivery behavior. `npm test` includes an isolation check that rejects known
+evaluation literals in production prompts, expected-answer propagation into
+the extraction payload, permissive identifier substring matching, and generic
+elongation types used as wildcards for a specific gauge-length type.
 
 To update corrected expected answers without reading or uploading the PDFs again:
 

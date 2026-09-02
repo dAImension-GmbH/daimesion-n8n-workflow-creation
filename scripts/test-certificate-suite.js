@@ -29,7 +29,7 @@ for (const nodeName of ["Zeugnis in Belegblöcke teilen", "Belege sammeln und No
   if (!code.includes("niemals minimieren") && !code.includes("niemals zu feldweisen Minima") && !code.includes("niemals feldweise Minima")) throw new Error(`${nodeName}: cross-specimen minimum prohibition is missing.`);
   if (!code.includes("Bei parallel angeordneten Mechanikspalten")) throw new Error(`${nodeName}: paired mechanical-column rule is missing.`);
   if (!code.includes("Bestell-Nr./Customer Order/P.O.")) throw new Error(`${nodeName}: header-label disambiguation rule is missing.`);
-  if (!code.includes("Werkstoffspezifikationen, die in der Material-/B02-Zeile stehen")) throw new Error(`${nodeName}: material-standard extraction rule is missing.`);
+  if (!code.includes("Werkstoffspezifikationen in einer Material-/B02-Zeile")) throw new Error(`${nodeName}: material-standard extraction rule is missing.`);
   if (code.includes("feldweise Minimum gebildet")) throw new Error(`${nodeName}: obsolete cross-specimen minimum rule is still present.`);
 }
 const extractionCode = workflow.nodes.find((node) => node.name === "Zeugnis in Belegblöcke teilen")?.parameters?.jsCode ?? "";
@@ -274,7 +274,9 @@ for (const test of venusAliases.results[0].tensileTests) {
   test.elongations[1].type = "A";
 }
 const venusAliasResult = (await evaluate(venusCase, venusAliases))[0]?.json;
-if (venusAliasResult?.passed !== 1) throw new Error(`Equivalent Venus elongation labels were rejected: ${venusAliasResult?.reasoning}`);
+if (venusAliasResult?.passed !== 0 || venusAliasResult?.tensilePassed !== 0) {
+  throw new Error("Generic elongation A incorrectly satisfied specific Venus gauge-length types.");
+}
 
 const venusLiveLabels = actualFor(venusCase);
 for (const test of venusLiveLabels.results[0].tensileTests) {
@@ -282,13 +284,17 @@ for (const test of venusLiveLabels.results[0].tensileTests) {
   test.elongations[1].type = "% Elongation (Wert 2)";
 }
 const venusLiveLabelResult = (await evaluate(venusCase, venusLiveLabels))[0]?.json;
-if (venusLiveLabelResult?.passed !== 1) throw new Error(`Live Venus elongation labels were rejected: ${venusLiveLabelResult?.reasoning}`);
+if (venusLiveLabelResult?.passed !== 0 || venusLiveLabelResult?.tensilePassed !== 0) {
+  throw new Error("Unresolved Venus source-column labels incorrectly satisfied specific gauge-length types.");
+}
 
 const jmdCase = cases.find((entry) => entry.caseId === "jmd-100000125315");
 const jmdAliases = actualFor(jmdCase);
 jmdAliases.results[0].tensileTests[0].elongations[0].type = "A (Dehng. C13 / Elongation %)";
 const jmdAliasResult = (await evaluate(jmdCase, jmdAliases))[0]?.json;
-if (jmdAliasResult?.passed !== 1) throw new Error(`Generic JMD source elongation label was rejected: ${jmdAliasResult?.reasoning}`);
+if (jmdAliasResult?.passed !== 0 || jmdAliasResult?.tensilePassed !== 0) {
+  throw new Error("Generic JMD elongation label incorrectly satisfied the expected 4D gauge type.");
+}
 
 for (const [caseId, equivalentProduct] of [
   ["starofit-26030318", "Exzentrisches Reduzierstück, DIN EN 10253-2:2021-11 Typ A, nahtlos"],

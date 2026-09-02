@@ -545,6 +545,196 @@ const venusLiveShape = await validate({ ...baseRow, heatNumber: "N3164", yieldSt
 assertEqual("Venus live-shape preferred elongation", venusLiveShape.elongation, 63);
 assertDeepEqual("Venus live-shape paired elongations", venusLiveShape.tensileTests.map((test) => test.elongations.map((entry) => entry.valuePercent)), [[63, 57.53], [64, 58.44]]);
 
+const syntheticPairedTable = await validate({
+  ...baseRow,
+  heatNumber: "SYNTHETIC",
+  tensileTests: [
+    { yieldStrengths: [{ type: "Rp0.2", valueMPa: 312.45 }], tensileStrengthMPa: 642.71, elongations: [{ type: "% Elongation", valuePercent: 48 }, { type: "% Elongation", valuePercent: 44.25 }] },
+    { yieldStrengths: [{ type: "Rp0.2", valueMPa: 318.6 }], tensileStrengthMPa: 658.24, elongations: [{ type: "% Elongation", valuePercent: 50 }, { type: "% Elongation", valuePercent: 46.75 }] },
+  ],
+}, {
+  criticalSource: "<table><tr><td>Tensile Strength</td><td colspan=\"2\">Yield Strength</td><td>% Elongation</td></tr><tr><td>Rm</td><td>first offset</td><td>second offset</td><td>FS</td></tr><tr><td>642.71658.24</td><td>312.45318.60</td><td>345.10352.75</td><td>48.0 / 44.2550.0 / 46.75</td></tr><tr><td colspan=\"4\">FS = Full Section</td></tr></table>",
+});
+assertDeepEqual("synthetic paired source yields", syntheticPairedTable.tensileTests.map((test) => test.yieldStrengths), [
+  [{ type: "Rp0.2", valueMPa: 312.45 }, { type: "Rp1.0", valueMPa: 345.1 }],
+  [{ type: "Rp0.2", valueMPa: 318.6 }, { type: "Rp1.0", valueMPa: 352.75 }],
+]);
+assertDeepEqual("synthetic paired source elongation types", syntheticPairedTable.tensileTests.map((test) => test.elongations.map((entry) => entry.type)), [["50MM", "5D"], ["50MM", "5D"]]);
+
+const syntheticMultiElongationColumns = await validate({
+  ...baseRow,
+  heatNumber: "SYNTHETIC-COLUMNS",
+  tensileTests: [{
+    sampleNumber: "S-204",
+    yieldStrengths: [{ type: "Rp0.2", valueMPa: 241 }, { type: "Rp1.0", valueMPa: 289 }],
+    tensileStrengthMPa: 537,
+    elongations: [{ type: "A5", valuePercent: 38.4 }],
+  }],
+}, {
+  criticalSource: [
+    '<table><tr><td>Specimen-No.</td><td>Rp0.2 [MPa]</td><td>Rp1.0 [MPa]</td><td>Rm [MPa]</td><td>A5 [%]</td><td>A2\" [%]</td><td>Z [%]</td></tr>',
+    '<tr><td>DISTRACTOR</td><td>255</td><td>302</td><td>561</td><td>36.2</td><td>41.1</td><td>48</td></tr>',
+    '<tr><td>S-204</td><td>241</td><td>289</td><td>537</td><td>38.4</td><td>44.6</td><td>52</td></tr></table>',
+  ].join("\n"),
+});
+assertDeepEqual("explicit elongation columns stay paired by strength core", syntheticMultiElongationColumns.tensileTests[0].elongations, [
+  { type: "A5", valuePercent: 38.4 },
+  { type: "2IN", valuePercent: 44.6 },
+]);
+
+const syntheticMissingMultirowHeaderTest = await validate({
+  ...baseRow,
+  heatNumber: "HX-77",
+  tensileTests: [{
+    yieldStrengths: [{ type: "ReH", valueMPa: 295 }],
+    tensileStrengthMPa: 438,
+    elongations: [{ type: "A5", valuePercent: 39.8 }],
+  }],
+}, {
+  criticalSource: [
+    '<table><tr><td>Direction / Orientation / Richtung</td><td>longitudinal / längs</td></tr></table>',
+    '<table><tr><td>Heat / Schmelze</td><td>Test Piece / Prüfstück</td><td>Dimension / Abmessung</td><td>YS / Streckgr.</td><td>TS / Zugfest.</td><td>Elong. / Dehnung</td></tr>',
+    '<tr><td></td><td></td><td>mm</td><td>Rp0.2 MPa</td><td>Rm MPa</td><td>5,85√So %</td></tr>',
+    '<tr><td>min</td><td></td><td>-</td><td>230</td><td>350</td><td>24</td></tr>',
+    '<tr><td>HX-77</td><td>T-9</td><td>18.40X06.70</td><td>287</td><td>421</td><td>41.2</td></tr></table>',
+  ].join("\n"),
+});
+assertEqual("missing source-table test appended", syntheticMissingMultirowHeaderTest.tensileTests.length, 2);
+assertDeepEqual("multirow source-table test", syntheticMissingMultirowHeaderTest.tensileTests[1], {
+  sampleNumber: "T-9",
+  yieldStrengths: [{ type: "Rp0.2", valueMPa: 287 }],
+  tensileStrengthMPa: 421,
+  elongations: [{ type: "5D", valuePercent: 41.2 }],
+  orientation: "longitudinal",
+  specimenDimensions: "18.40 x 06.70 mm",
+});
+
+const normalizedSpecimenLocation = await validate({
+  ...baseRow,
+  tensileTests: [{
+    yieldStrengths: [{ type: "Rp0.2", valueMPa: 246 }],
+    tensileStrengthMPa: 522,
+    elongations: [{ type: "5D", valuePercent: 37.2 }],
+    specimenLocation: "At quarter thickness",
+  }],
+});
+assertEqual("leading specimen-location preposition", normalizedSpecimenLocation.tensileTests[0].specimenLocation, "quarter thickness");
+
+const normalizedSpecimenDimensions = await validate({
+  ...baseRow,
+  tensileTests: [{
+    yieldStrengths: [{ type: "Rp0.2", valueMPa: 248 }],
+    tensileStrengthMPa: 526,
+    elongations: [{ type: "5D", valuePercent: 36.8 }],
+    specimenDimensions: "Ø 11,8",
+  }],
+});
+assertEqual("unitless metric specimen dimensions", normalizedSpecimenDimensions.tensileTests[0].specimenDimensions, "Ø 11.8 mm");
+
+const normalizedRectangularSpecimen = await validate({
+  ...baseRow,
+  tensileTests: [{
+    yieldStrengths: [{ type: "Rp0.2", valueMPa: 249 }],
+    tensileStrengthMPa: 528,
+    elongations: [{ type: "5D", valuePercent: 36.5 }],
+    specimenDimensions: "19.84 x 7.12 mm, Area 143.20 mm², strip specimen",
+  }],
+});
+assertEqual("rectangular specimen excludes area suffix", normalizedRectangularSpecimen.tensileTests[0].specimenDimensions, "19.84 x 7.12 mm");
+
+const normalizedRoundSpecimen = await validate({
+  ...baseRow,
+  tensileTests: [{
+    yieldStrengths: [{ type: "Rp0.2", valueMPa: 251 }],
+    tensileStrengthMPa: 530,
+    elongations: [{ type: "5D", valuePercent: 36.9 }],
+    specimenDimensions: "Size 9.50 mm, Fläche 70.88 mm² (zylindrisch)",
+  }],
+});
+assertEqual("round specimen retains size and area", normalizedRoundSpecimen.tensileTests[0].specimenDimensions, "9.50 mm / 70.88 mm2");
+
+const normalizedFiftyMillimetreElongation = await validate({
+  ...baseRow,
+  tensileTests: [{
+    yieldStrengths: [{ type: "Rp0.2", valueMPa: 252 }],
+    tensileStrengthMPa: 531,
+    elongations: [{ type: "A50", valuePercent: 39.6, gaugeLengthMm: 50 }, { type: "A5", valuePercent: 35.1 }],
+  }],
+});
+assertDeepEqual("explicit 50 mm elongation type", normalizedFiftyMillimetreElongation.tensileTests[0].elongations, [
+  { type: "50MM", valuePercent: 39.6, gaugeLengthMm: 50 },
+  { type: "A5", valuePercent: 35.1 },
+]);
+
+const correctedLabeledCertificateSuffix = await validate({ ...baseRow, certificateNumber: "W1234566" }, {
+  criticalSource: "Inspection certificate according to EN 10204 No.: W1234566 Manufacturer stamp",
+});
+assertEqual("labeled duplicated W-certificate suffix", correctedLabeledCertificateSuffix.certificateNumber, "W123456");
+
+const sourceDefinedGenericElongation = await validate({
+  ...baseRow,
+  tensileTests: [{
+    yieldStrengths: [{ type: "Rp0.2", valueMPa: 254 }],
+    tensileStrengthMPa: 535,
+    elongations: [{ type: "Elongation", valuePercent: 40.2 }],
+  }],
+}, { criticalSource: "Tensile test at room temperature: Lo = 4Do" });
+assertEqual("sole source gauge defines generic elongation", sourceDefinedGenericElongation.tensileTests[0].elongations[0].type, "4D");
+
+const sourceConfirmedGenericYield = await validate({
+  ...baseRow,
+  heatNumber: "H-GENERIC",
+  tensileTests: [{
+    sampleNumber: "SPEC-17",
+    yieldStrengths: [],
+    tensileStrengthMPa: 418,
+    elongations: [{ type: "5D", valuePercent: 34.7 }],
+  }, {
+    sampleNumber: "H-GENERIC/2",
+    yieldStrengths: [],
+    tensileStrengthMPa: 446,
+    elongations: [{ type: "5D", valuePercent: 31.2 }],
+    sourceType: "base-material",
+  }],
+}, {
+  criticalSource: [
+    '<table><tr><td>Specimen No.</td><td>Yield Point MPa</td><td>Tensile Strength MPa</td><td>Elongation 5d %</td></tr>',
+    '<tr><td>SPEC-17</td><td>276</td><td>418</td><td>34.7</td></tr></table>',
+    '<table><tr><td rowspan="2">Test results</td><td rowspan="2">Heat No. / Specimen No.</td><td colspan="2">MPa Yield Point</td><td colspan="2">MPa Tensile Strength</td><td colspan="2">% (5d) Elongation</td></tr>',
+    '<tr><td colspan="6">Longitudinal specimen / 20 C</td></tr>',
+    '<tr><td>Z</td><td>H-GENERIC/2</td><td colspan="2">284</td><td colspan="2">446</td><td colspan="2">31.2</td></tr></table>',
+  ].join("\n"),
+  evidence: { chunks: [{ heats: [{ heatNumber: { value: "H-GENERIC" }, tensileTests: [{
+      sampleNumber: "SPEC-17",
+      yieldStrengths: [],
+      tensileStrengthMPa: 418,
+      elongations: [{ type: "5D", valuePercent: 34.7 }],
+    }, {
+      sampleNumber: "H-GENERIC/2",
+      yieldStrengths: [],
+      tensileStrengthMPa: 446,
+      elongations: [{ type: "5D", valuePercent: 31.2 }],
+      sourceType: "base-material",
+    }] }] }] },
+});
+assertDeepEqual("source-confirmed generic yields survive evidence precedence", sourceConfirmedGenericYield.tensileTests.map((test) => test.yieldStrengths), [
+  [{ type: "ReH", valueMPa: 276 }],
+  [{ type: "ReH", valueMPa: 284 }],
+]);
+
+const normalizedMaterialGrades = await validate({
+  ...baseRow,
+  werkstoff1: "Steel G 482",
+  werkstoff2: "G 482L",
+}, { criticalSource: "Material: 3-G 482/G 482L - forged condition" });
+assertEqual("generic material category removed", normalizedMaterialGrades.werkstoff1, "G482/G482L");
+assertEqual("slash-connected material occupies one slot", normalizedMaterialGrades.werkstoff2, "-1");
+
+const completeCreditor = await validate({ ...baseRow, creditor: "Acme Processing GmbH" }, {
+  criticalSource: "Acme Processing GmbH\nPrecision Components\nIndustrial Road 7\nINSPECTION CERTIFICATE",
+});
+assertEqual("complete two-line deck manufacturer", completeCreditor.creditor, "Acme Processing GmbH Precision Components");
+
 const lindemann = await validate({
   ...baseRow,
   heatNumber: "57495K",

@@ -1,9 +1,9 @@
 export const deterministicEvaluationCode = String.raw`const actual = $('Ergebnis validieren und Dokumentenreview vorbereiten').first().json;
 let evaluationRow = {};
 try { evaluationRow = $('When fetching a dataset row').first().json; } catch {}
-let prepared = {};
-try { prepared = $('Evaluations-PDF vorbereiten').first().json; } catch {}
-const expectedRaw = evaluationRow.expectedAnswer ?? prepared.expectedAnswer;
+let manualEvaluationRow = {};
+try { manualEvaluationRow = $('Evaluationsfall manuell laden').first().json; } catch {}
+const expectedRaw = evaluationRow.expectedAnswer ?? manualEvaluationRow.expectedAnswer;
 if (!expectedRaw) throw new Error('The evaluation row has no expectedAnswer.');
 let expected = expectedRaw;
 if (typeof expectedRaw === 'string') {
@@ -12,17 +12,23 @@ if (typeof expectedRaw === 'string') {
 const actualAnswer = JSON.stringify(actual);
 const expectedAnswer = typeof expectedRaw === 'string' ? expectedRaw : JSON.stringify(expectedRaw);
 const normalizeString = value => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '');
-const stringMatches = (actualValue, expectedValue) => {
+const exactStringMatches = (actualValue, expectedValue) => {
+  const actualNormalized = normalizeString(actualValue);
+  const expectedNormalized = normalizeString(expectedValue);
+  const alternatives = String(expectedValue ?? '').split(/\s+\/\s+/).map(normalizeString).filter(Boolean);
+  return Boolean(actualNormalized) && (actualNormalized === expectedNormalized || alternatives.some(value => actualNormalized === value));
+};
+const containsExpectedString = (actualValue, expectedValue) => {
   const actualNormalized = normalizeString(actualValue);
   const alternatives = String(expectedValue ?? '').split(/\s+\/\s+/).map(normalizeString).filter(Boolean);
-  return Boolean(actualNormalized) && alternatives.some(value => actualNormalized === value || actualNormalized.includes(value) || value.includes(actualNormalized));
+  return Boolean(actualNormalized) && alternatives.some(value => actualNormalized === value || actualNormalized.includes(value));
 };
 const productTokens = value => {
   const aliases = { exzentrisch: 'eccentric', exzentrisches: 'eccentric', reduzierstuck: 'reducer', reduzierstueck: 'reducer', typ: 'type', rf: 'raisedface', raised: 'raisedface', face: '', zoll: 'inch', stuck: 'piece', stueck: 'piece', stick: 'piece' };
   return String(value ?? '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).map(token => aliases[token] ?? token).filter(Boolean);
 };
 const productMatches = (actualValue, expectedValue) => {
-  if (stringMatches(actualValue, expectedValue)) return true;
+  if (containsExpectedString(actualValue, expectedValue)) return true;
   const actualTokens = new Set(productTokens(actualValue));
   return String(expectedValue ?? '').split(/\s+\/\s+/).some(alternative => {
     const expectedTokens = productTokens(alternative);
@@ -48,13 +54,13 @@ const normalizeOrientation = value => {
   if (/^(q|quer|transverse|transversal)/.test(compact) || compact.includes('transverse') || compact.includes('transversal')) return 'transverse';
   return compact;
 };
-const orientationMatches = (actualValue, expectedValue) => stringMatches(actualValue, expectedValue) || normalizeOrientation(actualValue) === normalizeOrientation(expectedValue);
+const orientationMatches = (actualValue, expectedValue) => normalizeOrientation(actualValue) === normalizeOrientation(expectedValue);
 const normalizeLocation = value => String(value ?? '')
   .normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/,/g, '.')
   .replace(/aussenradius|außenradius|outer\s*radius|surface/g, ' surface ')
   .replace(/\b(from|the|vom|von|der|des)\b/g, ' ')
   .replace(/[^a-z0-9.]+/g, '');
-const locationMatches = (actualValue, expectedValue) => stringMatches(actualValue, expectedValue) || normalizeLocation(actualValue) === normalizeLocation(expectedValue);
+const locationMatches = (actualValue, expectedValue) => normalizeLocation(actualValue) === normalizeLocation(expectedValue);
 const canonicalElongationType = value => {
   const raw = String(value ?? '').normalize('NFKD').replace(/\p{M}/gu, '').toUpperCase().replace(/,/g, '.');
   const compact = raw.replace(/\s+/g, '');
@@ -70,7 +76,7 @@ const canonicalElongationType = value => {
 const elongationTypeMatches = (actualValue, expectedValue) => {
   const actualType = canonicalElongationType(actualValue);
   const expectedType = canonicalElongationType(expectedValue);
-  return actualType === expectedType || actualType === 'A' || expectedType === 'A';
+  return actualType === expectedType;
 };
 const actualRows = Array.isArray(actual.results) ? actual.results : [];
 const expectedRows = Array.isArray(expected.positions) ? expected.positions : [];
@@ -97,19 +103,23 @@ const recordTensile = (path, ok, detail) => {
   (ok ? matchedTensileFacts : missingOrWrongTensileFacts).push(ok ? path : path + ': ' + detail);
   record(path, ok, detail);
 };
-for (const [key, actualKey] of [['certificateNumber','certificateNumber'], ['customerOrderNumber','customerOrderNumber'], ['creditor','creditor']]) {
+for (const [key, actualKey] of [['certificateNumber','certificateNumber'], ['customerOrderNumber','customerOrderNumber']]) {
   if (expected[key] === undefined) continue;
   const values = actualRows.map(row => row[actualKey]);
-  record(key, values.some(value => stringMatches(value, expected[key])), 'expected ' + JSON.stringify(expected[key]) + ', got ' + JSON.stringify(values));
+  record(key, values.some(value => exactStringMatches(value, expected[key])), 'expected ' + JSON.stringify(expected[key]) + ', got ' + JSON.stringify(values));
+}
+if (expected.creditor !== undefined) {
+  const values = actualRows.map(row => row.creditor);
+  record('creditor', values.some(value => containsExpectedString(value, expected.creditor)), 'expected ' + JSON.stringify(expected.creditor) + ', got ' + JSON.stringify(values));
 }
 if (expected.rawMaterialCertificate !== undefined) {
   const values = actualRows.map(row => row.rawMaterialCertificate);
-  record('rawMaterialCertificate', values.some(value => stringMatches(value, expected.rawMaterialCertificate)), 'expected ' + JSON.stringify(expected.rawMaterialCertificate) + ', got ' + JSON.stringify(values));
+  record('rawMaterialCertificate', values.some(value => exactStringMatches(value, expected.rawMaterialCertificate)), 'expected ' + JSON.stringify(expected.rawMaterialCertificate) + ', got ' + JSON.stringify(values));
 }
 const unusedRows = new Set(actualRows.map((_, index) => index));
 for (let expectedIndex = 0; expectedIndex < expectedRows.length; expectedIndex++) {
   const expectedRow = expectedRows[expectedIndex];
-  const candidates = [...unusedRows].filter(index => stringMatches(actualRows[index].heatNumber, expectedRow.heatNumber));
+  const candidates = [...unusedRows].filter(index => exactStringMatches(actualRows[index].heatNumber, expectedRow.heatNumber));
   let rowIndex = candidates.find(index => expectedRow.dimensions === undefined || dimensionsMatch(actualRows[index].dimensions, expectedRow.dimensions));
   if (rowIndex === undefined) rowIndex = candidates[0];
   const prefix = 'positions[' + expectedIndex + ']';
@@ -125,7 +135,7 @@ for (let expectedIndex = 0; expectedIndex < expectedRows.length; expectedIndex++
   }
   unusedRows.delete(rowIndex);
   const row = actualRows[rowIndex];
-  record(prefix + '.heatNumber', stringMatches(row.heatNumber, expectedRow.heatNumber), 'expected ' + expectedRow.heatNumber + ', got ' + row.heatNumber);
+  record(prefix + '.heatNumber', exactStringMatches(row.heatNumber, expectedRow.heatNumber), 'expected ' + expectedRow.heatNumber + ', got ' + row.heatNumber);
   if (expectedRow.quantity !== undefined) record(prefix + '.quantity', numberMatches(row.quantity, expectedRow.quantity), 'expected ' + JSON.stringify(expectedRow.quantity) + ', got ' + row.quantity);
   for (const field of ['product','dimensions']) {
     if (expectedRow[field] === undefined) continue;
@@ -133,14 +143,14 @@ for (let expectedIndex = 0; expectedIndex < expectedRows.length; expectedIndex++
     record(prefix + '.' + field, ok, 'expected ' + JSON.stringify(expectedRow[field]) + ', got ' + JSON.stringify(row[field]));
   }
   if (expectedRow.material !== undefined) {
-    const materials = [row.werkstoff1,row.werkstoff2,row.werkstoff3,row.werkstoff4,row.werkstoff5].filter(value => value && value !== '-1').join(' / ');
-    record(prefix + '.material', stringMatches(materials, expectedRow.material), 'expected ' + JSON.stringify(expectedRow.material) + ', got ' + JSON.stringify(materials));
+    const materials = [row.werkstoff1,row.werkstoff2,row.werkstoff3,row.werkstoff4,row.werkstoff5].filter(value => value && value !== '-1');
+    record(prefix + '.material', materials.some(value => exactStringMatches(value, expectedRow.material)), 'expected ' + JSON.stringify(expectedRow.material) + ', got ' + JSON.stringify(materials));
   }
   if (expectedRow.standards !== undefined) {
     const norms = [row.norm1,row.norm2,row.norm3,row.norm4,row.norm5].filter(value => value && value !== '-1').join(' / ');
     const standards = Array.isArray(expectedRow.standards) ? expectedRow.standards : [expectedRow.standards];
     for (let standardIndex = 0; standardIndex < standards.length; standardIndex++) {
-      record(prefix + '.standards[' + standardIndex + ']', stringMatches(norms, standards[standardIndex]), 'expected ' + JSON.stringify(standards[standardIndex]) + ', got ' + JSON.stringify(norms));
+      record(prefix + '.standards[' + standardIndex + ']', containsExpectedString(norms, standards[standardIndex]), 'expected ' + JSON.stringify(standards[standardIndex]) + ', got ' + JSON.stringify(norms));
     }
   }
   const expectedTests = Array.isArray(expectedRow.tensileTests) ? expectedRow.tensileTests : [];
@@ -156,7 +166,7 @@ for (let expectedIndex = 0; expectedIndex < expectedRows.length; expectedIndex++
         ? orientationMatches(actualTest[field], expectedTest[field])
         : field === 'specimenLocation'
           ? locationMatches(actualTest[field], expectedTest[field])
-          : stringMatches(actualTest[field], expectedTest[field]);
+          : exactStringMatches(actualTest[field], expectedTest[field]);
       recordTensile(testPrefix + '.' + field, matches, 'expected ' + JSON.stringify(expectedTest[field]) + ', got ' + JSON.stringify(actualTest[field]));
     }
     for (const field of ['testTemperatureC','tensileStrengthMPa','reductionOfAreaPercent','sourcePage']) {
